@@ -180,26 +180,60 @@ fi
 echo -e "${BLUE}[6/8] Installing APK Builder binary to ${INSTALL_DIR}...${NC}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Check if binary already built locally
+USE_EXISTING_BINARY=false
 if [[ -f "$SCRIPT_DIR/apkbuilder" ]]; then
+  # Check if it is an ELF executable
+  if head -c 4 "$SCRIPT_DIR/apkbuilder" 2>/dev/null | grep -q 'ELF'; then
+    USE_EXISTING_BINARY=true
+  fi
+fi
+
+if [[ "$USE_EXISTING_BINARY" == true ]]; then
+  echo "Using pre-compiled native Linux binary..."
   cp "$SCRIPT_DIR/apkbuilder" "$INSTALL_DIR/apkbuilder"
-elif [[ -f "$SCRIPT_DIR/apkbuilder.exe" ]]; then
-  # On cross-dev, check if go is installed on host to build native binary
-  if command -v go &>/dev/null; then
-    echo "Compiling native Linux binary from source..."
-    (cd "$SCRIPT_DIR" && go build -o "$INSTALL_DIR/apkbuilder" ./cmd/server)
-  else
-    echo -e "${RED}[Error] Native Linux binary not found. Please compile with 'go build -o apkbuilder ./cmd/server' first.${NC}"
-    exit 1
-  fi
 else
+  echo "Pre-compiled Linux binary not detected. Building from source..."
+  GO_BIN="go"
+  CLEANUP_GO_BOOTSTRAP=false
+
+  # Check if Go compiler is installed and version >= 1.22
+  GO_VALID=false
   if command -v go &>/dev/null; then
-    echo "Compiling native Linux binary from source..."
-    (cd "$SCRIPT_DIR" && go build -o "$INSTALL_DIR/apkbuilder" ./cmd/server)
-  else
-    echo -e "${RED}[Error] Could not find or build apkbuilder binary.${NC}"
-    exit 1
+    GO_VER=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' | cut -d. -f1,2)
+    GO_MAJOR=$(echo "$GO_VER" | cut -d. -f1)
+    GO_MINOR=$(echo "$GO_VER" | cut -d. -f2)
+    if [[ "$GO_MAJOR" -ge 1 && "$GO_MINOR" -ge 22 ]]; then
+      GO_VALID=true
+    fi
   fi
+
+  if [[ "$GO_VALID" != true ]]; then
+    ARCH=$(uname -m)
+    case "$ARCH" in
+      x86_64) GO_ARCH="amd64" ;;
+      aarch64|arm64) GO_ARCH="arm64" ;;
+      *) GO_ARCH="amd64" ;;
+    esac
+    echo "Downloading standalone Go toolchain (1.23.6 for $GO_ARCH)..."
+    BOOTSTRAP_DIR="/tmp/go-bootstrap"
+    rm -rf "$BOOTSTRAP_DIR"
+    mkdir -p "$BOOTSTRAP_DIR"
+    curl -sSL "https://go.dev/dl/go1.23.6.linux-${GO_ARCH}.tar.gz" | tar -xz -C "$BOOTSTRAP_DIR"
+    GO_BIN="$BOOTSTRAP_DIR/go/bin/go"
+    CLEANUP_GO_BOOTSTRAP=true
+  fi
+
+  echo "Compiling APK Builder single binary..."
+  (cd "$SCRIPT_DIR" && "$GO_BIN" build -o "$INSTALL_DIR/apkbuilder" ./cmd/server)
+
+  if [[ "$CLEANUP_GO_BOOTSTRAP" == true ]]; then
+    rm -rf /tmp/go-bootstrap
+  fi
+fi
+
+if [[ ! -f "$INSTALL_DIR/apkbuilder" ]]; then
+  echo -e "${RED}[Error] Failed to install or build apkbuilder binary.${NC}"
+  exit 1
 fi
 
 chmod 755 "$INSTALL_DIR/apkbuilder"

@@ -4,23 +4,21 @@
 *.dll
 *.so
 *.dylib
-apkbuilder
 
 # Data directory
 data/
 data_test/
+data_playwright/
 *.keystore
 *.jks
 
 # Build artifacts
-dist/
+frontend/dist/
+frontend/.angular/
 node_modules/
-.angular/
-build/
 output.apk
 .playwright-mcp/
 
 # OS files
 .DS_Store
 Thumbs.db
-

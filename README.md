@@ -51,7 +51,7 @@
 ## Quick Start (Ubuntu / Debian VPS)
 
 ### 1. Launch a Fresh Linux VPS
-Create an Ubuntu 22.04 / 24.04 or Debian 12 VPS with at least **2 vCPUs** and **4 GB RAM** (8 GB recommended for large Gradle/Flutter builds).
+Create an Ubuntu 22.04 / Latest or Debian 12 / Latest VPS with at least **2 vCPUs** and **4 GB RAM** (8 GB recommended for large Gradle/Flutter builds).
 
 ### 2. Run the One-Command Installer
 
