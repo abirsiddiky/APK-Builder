@@ -58,6 +58,7 @@ Create an Ubuntu 22.04 / 24.04 or Debian 12 VPS with at least **2 vCPUs** and **
 ```bash
 git clone https://github.com/abirsiddiky/apk-builder.git
 cd apk-builder
+chmod +x install.sh uninstall.sh
 sudo ./install.sh
 ```
 
