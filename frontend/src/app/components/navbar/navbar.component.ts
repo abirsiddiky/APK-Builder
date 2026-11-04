@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ApiService } from '../../services/api.service';
@@ -29,7 +29,7 @@ import { ApiService } from '../../services/api.service';
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg>
-              <span>Uptime: {{ sys.uptime_formatted }}</span>
+              <span>Uptime: {{ displayUptime() }}</span>
             </div>
           }
 
@@ -236,22 +236,65 @@ export class NavbarComponent implements OnInit, OnDestroy {
   private router = inject(Router);
 
   showBillingBanner = signal(false);
+  displayUptime = signal<string>('1 min');
   private statusInterval: any = null;
+  private tickerInterval: any = null;
+  private baseUptimeSeconds = 0;
+  private receivedAt = 0;
+
+  constructor() {
+    effect(() => {
+      const sys = this.api.systemStatus();
+      if (sys && sys.uptime_seconds >= 0) {
+        this.baseUptimeSeconds = sys.uptime_seconds;
+        this.receivedAt = Date.now();
+        this.displayUptime.set(this.formatUptime(sys.uptime_seconds));
+      }
+    });
+  }
 
   ngOnInit(): void {
-    // Poll system status every 25 seconds for uptime and idle updates
+    // Immediate initial fetch
+    this.api.refreshSystemStatus();
+    this.checkBuildCompletion();
+
+    // Poll system status every 15 seconds
     this.statusInterval = setInterval(() => {
       this.api.refreshSystemStatus();
       this.checkBuildCompletion();
-    }, 25000);
+    }, 15000);
 
-    this.checkBuildCompletion();
+    // Local 1-second ticker smoothly increments uptime in UI
+    this.tickerInterval = setInterval(() => {
+      if (this.receivedAt > 0) {
+        const elapsed = Math.floor((Date.now() - this.receivedAt) / 1000);
+        this.displayUptime.set(this.formatUptime(this.baseUptimeSeconds + elapsed));
+      }
+    }, 1000);
   }
 
   ngOnDestroy(): void {
-    if (this.statusInterval) {
-      clearInterval(this.statusInterval);
+    if (this.statusInterval) clearInterval(this.statusInterval);
+    if (this.tickerInterval) clearInterval(this.tickerInterval);
+  }
+
+  private formatUptime(totalSecs: number): string {
+    const totalMins = Math.floor(totalSecs / 60);
+    if (totalMins < 1) {
+      return '1 min';
     }
+    const days = Math.floor(totalMins / (24 * 60));
+    const remMins = totalMins % (24 * 60);
+    const hours = Math.floor(remMins / 60);
+    const mins = remMins % 60;
+
+    if (days > 0) {
+      return mins > 0 ? `${days}d ${hours}h ${mins}m` : `${days}d ${hours}h`;
+    }
+    if (hours > 0) {
+      return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+    }
+    return `${mins} min`;
   }
 
   checkBuildCompletion(): void {

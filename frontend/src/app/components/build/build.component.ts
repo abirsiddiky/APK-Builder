@@ -460,7 +460,7 @@ export class BuildComponent implements OnInit, OnDestroy {
   private refreshStatus(): void {
     this.api.getBuildStatus().subscribe({
       next: (status) => {
-        if (status.duration_seconds > 0) {
+        if (status.duration_seconds >= 0) {
           this.secondsCount = status.duration_seconds;
           this.updateFormattedTime();
         }
@@ -469,11 +469,18 @@ export class BuildComponent implements OnInit, OnDestroy {
   }
 
   private updateFormattedTime(): void {
-    const mins = Math.floor(this.secondsCount / 60);
-    const secs = this.secondsCount % 60;
+    const hrs = Math.floor(this.secondsCount / 3600);
+    const rem = this.secondsCount % 3600;
+    const mins = Math.floor(rem / 60);
+    const secs = rem % 60;
     const mStr = mins < 10 ? `0${mins}` : `${mins}`;
     const sStr = secs < 10 ? `0${secs}` : `${secs}`;
-    this.formattedElapsed.set(`${mStr}:${sStr}`);
+    if (hrs > 0) {
+      const hStr = hrs < 10 ? `0${hrs}` : `${hrs}`;
+      this.formattedElapsed.set(`${hStr}:${mStr}:${sStr}`);
+    } else {
+      this.formattedElapsed.set(`${mStr}:${sStr}`);
+    }
   }
 
   isBuilding(): boolean {

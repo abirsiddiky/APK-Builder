@@ -2,6 +2,7 @@ export interface SystemStatus {
   server_start_time: string;
   uptime_seconds: number;
   uptime_formatted: string;
+  process_uptime_seconds?: number;
   last_activity: string;
   idle_seconds: number;
   idle_minutes: number;
