@@ -1,0 +1,26 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+apkbuilder
+
+# Data directory
+data/
+data_test/
+*.keystore
+*.jks
+
+# Build artifacts
+dist/
+node_modules/
+.angular/
+build/
+output.apk
+.playwright-mcp/
+
+# OS files
+.DS_Store
+Thumbs.db
+

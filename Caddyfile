@@ -1,0 +1,20 @@
+# APK Builder Caddy Configuration
+# Low-latency reverse proxy for APK Builder with SSE streaming support
+
+:80 {
+    # Reverse proxy backend with buffering disabled for real-time SSE logs
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+
+    # Compression for static web assets
+    encode zstd gzip
+
+    # Essential security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+}

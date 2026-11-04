@@ -1,0 +1,37 @@
+[Unit]
+Description=APK Builder - Self-Hosted Android APK Build Service
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=builder
+Group=builder
+WorkingDirectory=/var/lib/apkbuilder
+ExecStart=/opt/apkbuilder/apkbuilder
+
+# Environment Configuration
+Environment="PORT=8080"
+Environment="DATA_DIR=/var/lib/apkbuilder"
+Environment="ANDROID_HOME=/opt/android-sdk"
+Environment="ANDROID_SDK_ROOT=/opt/android-sdk"
+Environment="FLUTTER_ROOT=/opt/flutter"
+Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
+Environment="PATH=/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Process Management & Security Hardening
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/apkbuilder /tmp
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apkbuilder
+
+[Install]
+WantedBy=multi-user.target
