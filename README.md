@@ -116,13 +116,29 @@ Once installation finishes, the script prints your web dashboard URL and a clear
 
 ## Updating an Existing Installation
 
-To upgrade APK Builder to the latest version on an existing server while **preserving your admin token, keystores, and settings**:
+All updates are **idempotent and safe**: your existing admin token (`/etc/apkbuilder/env`), keystores, build artifacts, and settings are automatically preserved.
+
+### Method 1: One-Command Quick Update (Recommended)
+If you originally installed using `get.sh`, simply run the installer one-liner again to fetch and install the latest release:
 
 ```bash
+curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash
+```
+
+### Method 2: Git Repository Update
+If you have the repository cloned (or clone it to `~/apk-builder`):
+
+```bash
+# If cloning for the first time:
+git clone https://github.com/abirsiddiky/APK-Builder.git ~/apk-builder
+
+# Update and apply:
 cd ~/apk-builder
 git pull
 sudo ./install.sh
 ```
+
+*(Alternatively, to quickly swap the pre-compiled binary without running full setup: `sudo cp -f apkbuilder /opt/apkbuilder/apkbuilder && sudo systemctl restart apkbuilder`).*
 
 ---
 
