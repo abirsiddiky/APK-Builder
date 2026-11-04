@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/bin/bash
 # ==============================================================================
 # APK BUILDER - Quick Installer Bootstrap
 # Usage:

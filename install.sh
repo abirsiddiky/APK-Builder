@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # ==============================================================================
 # APK BUILDER - Native One-Time Installer (Ubuntu / Debian)
 # Single binary, no Docker, systemd service running as user 'builder'
@@ -107,8 +107,19 @@ SERVER_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://icanhazip.com || 
 
 echo -e "${BLUE}[1/8] Updating package lists and installing core dependencies...${NC}"
 apt-get update -qq </dev/null
+
+# Select best available OpenJDK package (Debian 13+ uses openjdk-21-jdk / default-jdk; older uses openjdk-17-jdk)
+JAVA_PKG="openjdk-17-jdk"
+if ! apt-cache show openjdk-17-jdk >/dev/null 2>&1; then
+  if apt-cache show openjdk-21-jdk >/dev/null 2>&1; then
+    JAVA_PKG="openjdk-21-jdk"
+  else
+    JAVA_PKG="default-jdk"
+  fi
+fi
+
 apt-get install -y -qq -o Dpkg::Options::="--force-confold" \
-  openjdk-17-jdk \
+  "$JAVA_PKG" \
   git \
   unzip \
   curl \
@@ -121,14 +132,32 @@ apt-get install -y -qq -o Dpkg::Options::="--force-confold" \
   debian-archive-keyring \
   apt-transport-https </dev/null
 
+# Resolve JAVA_HOME dynamically
+JAVA_BIN=$(command -v java 2>/dev/null || true)
+if [[ -n "$JAVA_BIN" ]]; then
+  CANONICAL_JAVA=$(readlink -f "$JAVA_BIN" 2>/dev/null || true)
+  JAVA_HOME=$(dirname "$(dirname "$CANONICAL_JAVA")")
+else
+  JAVA_HOME="/usr/lib/jvm/default-java"
+fi
+
+if [[ -d "$JAVA_HOME" && ! -d "/usr/lib/jvm/default-java" ]]; then
+  ln -sf "$JAVA_HOME" /usr/lib/jvm/default-java
+fi
+
+export JAVA_HOME
+export PATH="$JAVA_HOME/bin:$PATH"
+
 # Install Caddy web server
 echo -e "${BLUE}[2/8] Installing Caddy reverse proxy...${NC}"
-mkdir -p /usr/share/keyrings /etc/apt/sources.list.d
-rm -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' </dev/null | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg </dev/null
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' </dev/null | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 if ! command -v caddy &>/dev/null; then
-  apt-get update -qq </dev/null
+  mkdir -p /usr/share/keyrings /etc/apt/sources.list.d
+  rm -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  if curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+    chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list 2>/dev/null || true
+    apt-get update -qq </dev/null || true
+  fi
   apt-get install -y -qq -o Dpkg::Options::="--force-confold" caddy </dev/null
 fi
 
@@ -218,8 +247,7 @@ if [[ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]]; then
   rm -rf /tmp/cmdline_extract "$TMP_CMDLINE"
 fi
 
-export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
 
 # Accept SDK licenses automatically
 echo "Accepting Android SDK licenses..."

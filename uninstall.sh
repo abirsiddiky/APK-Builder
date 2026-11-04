@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # ==============================================================================
 # APK BUILDER - Uninstallation & VPS Cleanup Script
 # Run as root (sudo) to completely remove APK Builder and securely wipe data
@@ -179,11 +179,11 @@ if [[ "$REMOVE_SDK" == true ]]; then
 fi
 
 if [[ "$REMOVE_DEPS" == true ]]; then
-  echo "Uninstalling OpenJDK 17 and Caddy..."
+  echo "Uninstalling OpenJDK and Caddy..."
   export DEBIAN_FRONTEND=noninteractive
-  apt-get purge -y -qq openjdk-17-jdk caddy 2>/dev/null || true
+  apt-get purge -y -qq openjdk-17-jdk openjdk-21-jdk default-jdk caddy 2>/dev/null || true
   apt-get autoremove -y -qq 2>/dev/null || true
-  REMOVED_SUMMARY+=("Uninstalled openjdk-17-jdk and caddy packages")
+  REMOVED_SUMMARY+=("Uninstalled OpenJDK and caddy packages")
 fi
 
 # Print final removal summary
@@ -193,7 +193,7 @@ echo -e "${GREEN}${BOLD}========================================================
 echo ""
 echo -e "${BOLD}Removed components:${NC}"
 for item in "${REMOVED_SUMMARY[@]}"; do
-  echo -e "  ${GREEN}✓${NC} $item"
+  echo -e "  ${GREEN}Ã¢Å“â€œ${NC} $item"
 done
 echo ""
 if [[ "$REMOVE_SDK" == false ]]; then

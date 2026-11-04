@@ -1,4 +1,4 @@
-[Unit]
+﻿[Unit]
 Description=APK Builder - Self-Hosted Android APK Build Service
 After=network.target network-online.target
 Wants=network-online.target
@@ -18,8 +18,8 @@ Environment="GRADLE_USER_HOME=/var/lib/apkbuilder/.gradle"
 Environment="ANDROID_HOME=/opt/android-sdk"
 Environment="ANDROID_SDK_ROOT=/opt/android-sdk"
 Environment="FLUTTER_ROOT=/opt/flutter"
-Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
-Environment="PATH=/opt/gradle/bin:/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="JAVA_HOME=/usr/lib/jvm/default-java"
+Environment="PATH=/opt/gradle/bin:/opt/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:/usr/lib/jvm/default-java/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Process Management & Security Hardening
 Restart=on-failure

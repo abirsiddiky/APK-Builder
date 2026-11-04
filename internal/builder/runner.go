@@ -1,4 +1,4 @@
-package builder
+﻿package builder
 
 import (
 	"archive/zip"
@@ -797,19 +797,27 @@ func ensureSdkLicenses(androidHome string) {
 
 func (r *Runner) resolveJavaHome() string {
 	if jh := os.Getenv("JAVA_HOME"); jh != "" {
-		return jh
+		if fi, err := os.Stat(jh); err == nil && fi.IsDir() {
+			return jh
+		}
 	}
 	if runtime.GOOS == "linux" {
 		candidates := []string{
+			"/usr/lib/jvm/default-java",
 			"/usr/lib/jvm/java-17-openjdk-amd64",
 			"/usr/lib/jvm/java-17-openjdk-arm64",
 			"/usr/lib/jvm/java-21-openjdk-amd64",
 			"/usr/lib/jvm/java-21-openjdk-arm64",
-			"/usr/lib/jvm/default-java",
 		}
 		for _, c := range candidates {
 			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 				return c
+			}
+		}
+		// Resolve canonical directory from java binary
+		if p, err := exec.LookPath("java"); err == nil {
+			if realPath, err := filepath.EvalSymlinks(p); err == nil {
+				return filepath.Dir(filepath.Dir(realPath))
 			}
 		}
 	}
