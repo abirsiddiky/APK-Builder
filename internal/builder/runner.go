@@ -296,16 +296,43 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 	var buildCmd *exec.Cmd
 
 	if detection.Type == ProjectTypeGradle {
-		// Ensure local.properties defines sdk.dir
+		// Ensure SDK licenses and local.properties
 		if r.androidHome != "" {
+			ensureSdkLicenses(r.androidHome)
 			ensureLocalProperties(detection.BuildDir, r.androidHome)
 		}
 
-		// Resolve Gradle build command (wrapper, system gradle, or auto-downloaded tool)
-		gradleCmd, err := r.resolveGradleExecutable(ctx, detection.BuildDir)
+		// Ensure Gradle wrapper (injects gradlew and gradle-wrapper.jar if missing in repo)
+		gradleCmd, err := r.ensureGradleWrapper(detection.BuildDir)
 		if err != nil {
-			r.failBuild(fmt.Sprintf("Failed to resolve Gradle build tool: %v", err))
+			r.failBuild(fmt.Sprintf("Failed to configure Gradle wrapper: %v", err))
 			return
+		}
+
+		// Ensure .env exists if .env.example is present (e.g. for secrets plugin)
+		envExample := filepath.Join(detection.BuildDir, ".env.example")
+		envFile := filepath.Join(detection.BuildDir, ".env")
+		if _, err := os.Stat(envExample); err == nil {
+			if _, err := os.Stat(envFile); os.IsNotExist(err) {
+				_ = copyFile(envExample, envFile)
+			}
+		}
+
+		// If debug build, ensure debug.keystore exists in repo if referenced
+		if r.currentBuild.BuildType == "debug" {
+			dbgKey := filepath.Join(detection.BuildDir, "debug.keystore")
+			if _, err := os.Stat(dbgKey); os.IsNotExist(err) {
+				_ = exec.Command("keytool", "-genkeypair",
+					"-alias", "androiddebugkey",
+					"-keypass", "android",
+					"-keystore", dbgKey,
+					"-storepass", "android",
+					"-dname", "CN=Android Debug,O=Android,C=US",
+					"-validity", "10000",
+					"-keyalg", "RSA",
+					"-keysize", "2048",
+				).Run()
+			}
 		}
 
 		targetTask := "assembleDebug"
@@ -314,7 +341,13 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 		}
 
 		args := []string{targetTask, "--console=plain"}
-		buildCmd = exec.CommandContext(ctx, gradleCmd, args...)
+		if runtime.GOOS == "windows" {
+			buildCmd = exec.CommandContext(ctx, gradleCmd, args...)
+		} else {
+			// On Linux, invoke via /bin/sh to guarantee execution
+			shArgs := append([]string{gradleCmd}, args...)
+			buildCmd = exec.CommandContext(ctx, "/bin/sh", shArgs...)
+		}
 		buildCmd.Dir = detection.BuildDir
 
 		// Setup environment
@@ -325,6 +358,40 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 		if jh := r.resolveJavaHome(); jh != "" {
 			buildEnv = append(buildEnv, "JAVA_HOME="+jh)
 		}
+		gradleUserHome := filepath.Join(r.dataDir, ".gradle")
+		_ = os.MkdirAll(gradleUserHome, 0755)
+		buildEnv = append(buildEnv, "GRADLE_USER_HOME="+gradleUserHome)
+
+		// Set keystore & signing env vars if available
+		if keystorePath != "" {
+			buildEnv = append(buildEnv,
+				"KEYSTORE_PATH="+keystorePath,
+				"STORE_PASSWORD="+req.StorePassword,
+				"KEY_PASSWORD="+req.KeyPassword,
+				"KEY_ALIAS="+req.KeystoreAlias,
+				"ANDROID_KEYSTORE_PATH="+keystorePath,
+				"ANDROID_STORE_PASSWORD="+req.StorePassword,
+				"ANDROID_KEY_PASSWORD="+req.KeyPassword,
+				"ANDROID_KEY_ALIAS="+req.KeystoreAlias,
+			)
+			// Also link/copy keystore to my-upload-key.jks in buildDir if referenced
+			uploadKeyPath := filepath.Join(detection.BuildDir, "my-upload-key.jks")
+			if _, err := os.Stat(uploadKeyPath); os.IsNotExist(err) {
+				_ = copyFile(keystorePath, uploadKeyPath)
+			}
+		}
+
+		// Prepend Java and SDK tools to PATH
+		pathEnv := os.Getenv("PATH")
+		if jh := r.resolveJavaHome(); jh != "" {
+			pathEnv = filepath.Join(jh, "bin") + string(os.PathListSeparator) + pathEnv
+		}
+		if r.androidHome != "" {
+			pathEnv = filepath.Join(r.androidHome, "cmdline-tools", "latest", "bin") + string(os.PathListSeparator) +
+				filepath.Join(r.androidHome, "platform-tools") + string(os.PathListSeparator) +
+				filepath.Join(r.androidHome, "build-tools", "34.0.0") + string(os.PathListSeparator) + pathEnv
+		}
+		buildEnv = append(buildEnv, "PATH="+pathEnv)
 		buildCmd.Env = buildEnv
 
 		if err := r.runStreamingCommand(ctx, buildCmd, "[gradle]"); err != nil {
@@ -429,7 +496,7 @@ func (r *Runner) signApk(ctx context.Context, buildDir string, inputApk string, 
 	// 1. Zipalign (4-byte alignment)
 	if zipalignBin != "" {
 		r.logger.Append(fmt.Sprintf("[Signing] Running zipalign via %s...", filepath.Base(zipalignBin)))
-		alignCmd := exec.CommandContext(ctx, zipalignBin, "-v", "-p", "4", inputApk, alignedApk)
+		alignCmd := exec.CommandContext(ctx, zipalignBin, "-f", "-v", "-p", "4", inputApk, alignedApk)
 		alignCmd.Dir = buildDir
 		if err := r.runStreamingCommand(ctx, alignCmd, "[zipalign]"); err != nil {
 			r.logger.Append(fmt.Sprintf("[Signing] Warning: zipalign failed (%v), continuing with raw APK", err))
@@ -651,10 +718,47 @@ func ensureLocalProperties(buildDir string, androidHome string) {
 		return
 	}
 	localProp := filepath.Join(buildDir, "local.properties")
-	if _, err := os.Stat(localProp); os.IsNotExist(err) {
-		clean := filepath.ToSlash(androidHome)
+	clean := filepath.ToSlash(androidHome)
+	// If local.properties exists, ensure sdk.dir is updated
+	if data, err := os.ReadFile(localProp); err == nil {
+		lines := strings.Split(string(data), "\n")
+		found := false
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "sdk.dir=") {
+				lines[i] = fmt.Sprintf("sdk.dir=%s", clean)
+				found = true
+				break
+			}
+		}
+		if !found {
+			lines = append(lines, fmt.Sprintf("sdk.dir=%s", clean))
+		}
+		_ = os.WriteFile(localProp, []byte(strings.Join(lines, "\n")), 0644)
+	} else {
 		content := fmt.Sprintf("sdk.dir=%s\n", clean)
 		_ = os.WriteFile(localProp, []byte(content), 0644)
+	}
+}
+
+func ensureSdkLicenses(androidHome string) {
+	if androidHome == "" {
+		return
+	}
+	licDir := filepath.Join(androidHome, "licenses")
+	_ = os.MkdirAll(licDir, 0777)
+
+	licenses := map[string]string{
+		"android-sdk-license": "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n8933bad161af4178b1185d1a37fbf41ea5269c55",
+		"android-sdk-preview-license": "84831b9409646a918e30573bab4c9c91346d8abd",
+		"android-googletv-license":    "601085b94cd77f0b54ff86406957099fed7926d4",
+		"android-sdk-arm-dbt-license": "859f317696f67ef3d7f30a50a5560e7834b43903",
+	}
+
+	for name, content := range licenses {
+		p := filepath.Join(licDir, name)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			_ = os.WriteFile(p, []byte(content+"\n"), 0666)
+		}
 	}
 }
 

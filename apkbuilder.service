@@ -13,6 +13,7 @@ ExecStart=/opt/apkbuilder/apkbuilder
 # Environment Configuration
 Environment="PORT=8080"
 Environment="DATA_DIR=/var/lib/apkbuilder"
+Environment="GRADLE_USER_HOME=/var/lib/apkbuilder/.gradle"
 Environment="ANDROID_HOME=/opt/android-sdk"
 Environment="ANDROID_SDK_ROOT=/opt/android-sdk"
 Environment="FLUTTER_ROOT=/opt/flutter"

@@ -75,7 +75,7 @@ export interface SelectedKeystore {
                       type="text"
                       [(ngModel)]="genForm.alias"
                       name="alias"
-                      placeholder="e.g. releasekey"
+                      placeholder="e.g. upload"
                       required
                       class="code-font"
                     />
@@ -640,7 +640,7 @@ export class KeystoreModalComponent {
   generatedDetails = signal<KeystoreDetails | null>(null);
 
   genForm: KeystoreGenerateRequest = {
-    alias: 'releasekey',
+    alias: 'upload',
     store_password: '',
     key_password: '',
     common_name: '',
