@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # ==============================================================================
 # APK BUILDER - Native One-Time Installer (Ubuntu / Debian)
 # Single binary, no Docker, systemd service running as user 'builder'
@@ -112,6 +112,7 @@ apt-get install -y -qq \
   tar \
   jq \
   wget \
+  xz-utils \
   debian-keyring \
   debian-archive-keyring \
   apt-transport-https

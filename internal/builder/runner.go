@@ -1,4 +1,4 @@
-package builder
+﻿package builder
 
 import (
 	"archive/zip"
@@ -399,12 +399,10 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 			return
 		}
 	} else if detection.Type == ProjectTypeFlutter {
-		flutterBin := "flutter"
-		if r.flutterHome != "" {
-			flutterBin = filepath.Join(r.flutterHome, "bin", "flutter")
-			if runtime.GOOS == "windows" {
-				flutterBin += ".bat"
-			}
+		flutterBin, err := r.resolveFlutterBin(ctx)
+		if err != nil {
+			r.failBuild(fmt.Sprintf("Flutter configuration failed: %v", err))
+			return
 		}
 
 		args := []string{"build", "apk"}
@@ -419,8 +417,43 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 
 		flutterEnv := os.Environ()
 		if r.androidHome != "" {
+			ensureSdkLicenses(r.androidHome)
 			flutterEnv = append(flutterEnv, "ANDROID_HOME="+r.androidHome, "ANDROID_SDK_ROOT="+r.androidHome)
 		}
+		if jh := r.resolveJavaHome(); jh != "" {
+			flutterEnv = append(flutterEnv, "JAVA_HOME="+jh)
+		}
+		gradleUserHome := filepath.Join(r.dataDir, ".gradle")
+		_ = os.MkdirAll(gradleUserHome, 0755)
+		flutterEnv = append(flutterEnv, "GRADLE_USER_HOME="+gradleUserHome)
+		pubCache := filepath.Join(r.dataDir, ".pub-cache")
+		_ = os.MkdirAll(pubCache, 0755)
+		flutterEnv = append(flutterEnv, "PUB_CACHE="+pubCache)
+
+		// Set keystore & signing env vars if available
+		if keystorePath != "" {
+			flutterEnv = append(flutterEnv,
+				"KEYSTORE_PATH="+keystorePath,
+				"STORE_PASSWORD="+req.StorePassword,
+				"KEY_PASSWORD="+req.KeyPassword,
+				"KEY_ALIAS="+req.KeystoreAlias,
+				"ANDROID_KEYSTORE_PATH="+keystorePath,
+				"ANDROID_STORE_PASSWORD="+req.StorePassword,
+				"ANDROID_KEY_PASSWORD="+req.KeyPassword,
+				"ANDROID_KEY_ALIAS="+req.KeystoreAlias,
+			)
+		}
+
+		pathEnv := os.Getenv("PATH")
+		pathEnv = filepath.Dir(flutterBin) + string(os.PathListSeparator) + pathEnv
+		if jh := r.resolveJavaHome(); jh != "" {
+			pathEnv = filepath.Join(jh, "bin") + string(os.PathListSeparator) + pathEnv
+		}
+		if r.androidHome != "" {
+			pathEnv = filepath.Join(r.androidHome, "platform-tools") + string(os.PathListSeparator) +
+				filepath.Join(r.androidHome, "cmdline-tools", "latest", "bin") + string(os.PathListSeparator) + pathEnv
+		}
+		flutterEnv = append(flutterEnv, "PATH="+pathEnv)
 		buildCmd.Env = flutterEnv
 
 		if err := r.runStreamingCommand(ctx, buildCmd, "[flutter]"); err != nil {
@@ -972,5 +1005,110 @@ func unzipArchive(src string, dest string) error {
 		}
 	}
 	return nil
+}
+
+func (r *Runner) resolveFlutterBin(ctx context.Context) (string, error) {
+	// 1. Check FLUTTER_ROOT / r.flutterHome if it actually exists on disk
+	if r.flutterHome != "" {
+		cand := filepath.Join(r.flutterHome, "bin", "flutter")
+		if runtime.GOOS == "windows" {
+			cand += ".bat"
+		}
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand, nil
+		}
+	}
+
+	// 2. Check standard /opt/flutter location on Linux
+	if runtime.GOOS == "linux" {
+		cand := "/opt/flutter/bin/flutter"
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand, nil
+		}
+	}
+
+	// 3. Check system PATH
+	if p, err := exec.LookPath("flutter"); err == nil {
+		return p, nil
+	}
+
+	// 4. Check dataDir tools/flutter
+	toolsFlutter := filepath.Join(r.dataDir, "tools", "flutter", "bin", "flutter")
+	if runtime.GOOS == "windows" {
+		toolsFlutter += ".bat"
+	}
+	if fi, err := os.Stat(toolsFlutter); err == nil && !fi.IsDir() {
+		return toolsFlutter, nil
+	}
+
+	// 5. On Linux, automatically download and configure Flutter on demand
+	if runtime.GOOS == "linux" {
+		return r.autoInstallFlutter(ctx)
+	}
+
+	return "", errors.New("flutter executable not found. Please install Flutter or add it to PATH")
+}
+
+func (r *Runner) autoInstallFlutter(ctx context.Context) (string, error) {
+	flutterToolsDir := filepath.Join(r.dataDir, "tools")
+	_ = os.MkdirAll(flutterToolsDir, 0755)
+	targetDir := filepath.Join(flutterToolsDir, "flutter")
+	flutterBin := filepath.Join(targetDir, "bin", "flutter")
+
+	if fi, err := os.Stat(flutterBin); err == nil && !fi.IsDir() {
+		return flutterBin, nil
+	}
+
+	r.logger.Append("[Pipeline] Flutter SDK was not pre-installed on this VPS.")
+	r.logger.Append("[Pipeline] Automatically downloading and configuring Flutter SDK (stable channel, ~750MB)...")
+
+	flutterURL := "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.29.0-stable.tar.xz"
+	if runtime.GOARCH == "arm64" {
+		flutterURL = "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_arm64_3.29.0-stable.tar.xz"
+	}
+
+	archivePath := filepath.Join(flutterToolsDir, "flutter.tar.xz")
+	defer os.Remove(archivePath)
+
+	r.logger.Append(fmt.Sprintf("[Pipeline] Downloading Flutter from %s (this may take 1-2 minutes)...", flutterURL))
+	downloadCmd := exec.CommandContext(ctx, "curl", "-sSL", "--fail", "-o", archivePath, flutterURL)
+	downloadCmd.Dir = flutterToolsDir
+	if err := r.runStreamingCommand(ctx, downloadCmd, "[download]"); err != nil {
+		return "", fmt.Errorf("failed to download Flutter SDK: %w (You can also install via: sudo ./install.sh --flutter)", err)
+	}
+
+	r.logger.Append("[Pipeline] Extracting Flutter archive to " + targetDir + "...")
+	extractCmd := exec.CommandContext(ctx, "tar", "-xJf", archivePath, "-C", flutterToolsDir)
+	extractCmd.Dir = flutterToolsDir
+	if err := r.runStreamingCommand(ctx, extractCmd, "[extract]"); err != nil {
+		return "", fmt.Errorf("failed to extract Flutter SDK: %w (ensure xz-utils is installed)", err)
+	}
+
+	if _, err := os.Stat(flutterBin); err != nil {
+		return "", fmt.Errorf("flutter binary not found at %s after extraction", flutterBin)
+	}
+
+	_ = os.Chmod(flutterBin, 0755)
+
+	// Add safe directory for git
+	_ = exec.Command("git", "config", "--global", "--add", "safe.directory", targetDir).Run()
+
+	// Precache Android artifacts
+	r.logger.Append("[Pipeline] Pre-caching Flutter Android artifacts...")
+	precacheCmd := exec.CommandContext(ctx, flutterBin, "precache", "--android")
+	precacheCmd.Dir = targetDir
+	precacheEnv := os.Environ()
+	if jh := r.resolveJavaHome(); jh != "" {
+		precacheEnv = append(precacheEnv, "JAVA_HOME="+jh)
+	}
+	if r.androidHome != "" {
+		ensureSdkLicenses(r.androidHome)
+		precacheEnv = append(precacheEnv, "ANDROID_HOME="+r.androidHome, "ANDROID_SDK_ROOT="+r.androidHome)
+	}
+	precacheCmd.Env = precacheEnv
+	_ = r.runStreamingCommand(ctx, precacheCmd, "[precache]")
+
+	r.logger.Append("[Pipeline] Flutter SDK configured successfully!")
+	return flutterBin, nil
 }
 
