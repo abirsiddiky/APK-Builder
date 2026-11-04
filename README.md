@@ -56,7 +56,7 @@ Create an Ubuntu 22.04 / 24.04 or Debian 12 VPS with at least **2 vCPUs** and **
 ### 2. Run the One-Command Installer
 
 ```bash
-git clone https://github.com/your-username/apk-builder.git
+git clone https://github.com/abirsiddiky/apk-builder.git
 cd apk-builder
 sudo ./install.sh
 ```
