@@ -35,3 +35,4 @@ SyslogIdentifier=apkbuilder
 
 [Install]
 WantedBy=multi-user.target
+

@@ -195,3 +195,4 @@ echo -e "${RED}${BOLD}                               FINAL REMINDER             
 echo -e "${RED}${BOLD}  Delete this VPS from your cloud provider panel (DigitalOcean, Hetzner, AWS,   ${NC}"
 echo -e "${RED}${BOLD}  Vultr, Linode) now to stop hourly billing!                                    ${NC}"
 echo -e "${RED}${BOLD}================================================================================${NC}\n"
+

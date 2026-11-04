@@ -307,3 +307,4 @@ echo ""
 echo -e "  ${RED}${BOLD}[REMINDER]${NC} Delete this VPS from your cloud provider panel when done"
 echo -e "             to stop ongoing hourly billing!"
 echo -e "${GREEN}${BOLD}================================================================================${NC}\n"
+

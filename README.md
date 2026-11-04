@@ -188,3 +188,4 @@ All endpoints except `POST /api/auth/login` require `Authorization: Bearer <toke
 ## License
 
 MIT License. Free to use on personal and commercial cloud instances.
+
