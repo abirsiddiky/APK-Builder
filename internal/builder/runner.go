@@ -1,12 +1,14 @@
 package builder
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -294,9 +296,16 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 	var buildCmd *exec.Cmd
 
 	if detection.Type == ProjectTypeGradle {
-		gradlew := detection.GradlewCmd
-		if runtime.GOOS != "windows" {
-			_ = os.Chmod(gradlew, 0755)
+		// Ensure local.properties defines sdk.dir
+		if r.androidHome != "" {
+			ensureLocalProperties(detection.BuildDir, r.androidHome)
+		}
+
+		// Resolve Gradle build command (wrapper, system gradle, or auto-downloaded tool)
+		gradleCmd, err := r.resolveGradleExecutable(ctx, detection.BuildDir)
+		if err != nil {
+			r.failBuild(fmt.Sprintf("Failed to resolve Gradle build tool: %v", err))
+			return
 		}
 
 		targetTask := "assembleDebug"
@@ -305,13 +314,16 @@ func (r *Runner) executePipeline(ctx context.Context, req *BuildRequest, buildDi
 		}
 
 		args := []string{targetTask, "--console=plain"}
-		buildCmd = exec.CommandContext(ctx, gradlew, args...)
+		buildCmd = exec.CommandContext(ctx, gradleCmd, args...)
 		buildCmd.Dir = detection.BuildDir
 
 		// Setup environment
 		buildEnv := os.Environ()
 		if r.androidHome != "" {
 			buildEnv = append(buildEnv, "ANDROID_HOME="+r.androidHome, "ANDROID_SDK_ROOT="+r.androidHome)
+		}
+		if jh := r.resolveJavaHome(); jh != "" {
+			buildEnv = append(buildEnv, "JAVA_HOME="+jh)
 		}
 		buildCmd.Env = buildEnv
 
@@ -632,5 +644,229 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+func ensureLocalProperties(buildDir string, androidHome string) {
+	if androidHome == "" {
+		return
+	}
+	localProp := filepath.Join(buildDir, "local.properties")
+	if _, err := os.Stat(localProp); os.IsNotExist(err) {
+		clean := filepath.ToSlash(androidHome)
+		content := fmt.Sprintf("sdk.dir=%s\n", clean)
+		_ = os.WriteFile(localProp, []byte(content), 0644)
+	}
+}
+
+func (r *Runner) resolveJavaHome() string {
+	if jh := os.Getenv("JAVA_HOME"); jh != "" {
+		return jh
+	}
+	if runtime.GOOS == "linux" {
+		candidates := []string{
+			"/usr/lib/jvm/java-17-openjdk-amd64",
+			"/usr/lib/jvm/java-17-openjdk-arm64",
+			"/usr/lib/jvm/java-21-openjdk-amd64",
+			"/usr/lib/jvm/java-21-openjdk-arm64",
+			"/usr/lib/jvm/default-java",
+		}
+		for _, c := range candidates {
+			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
+func (r *Runner) findSystemGradle() string {
+	if p, err := exec.LookPath("gradle"); err == nil {
+		return p
+	}
+	commonPaths := []string{
+		"/opt/gradle/bin/gradle",
+		"/usr/local/bin/gradle",
+		"/usr/bin/gradle",
+		"/snap/bin/gradle",
+	}
+	if runtime.GOOS == "windows" {
+		commonPaths = append(commonPaths,
+			`C:\Gradle\bin\gradle.bat`,
+			`C:\Program Files\Gradle\bin\gradle.bat`,
+		)
+	}
+	for _, cp := range commonPaths {
+		if fi, err := os.Stat(cp); err == nil && !fi.IsDir() {
+			return cp
+		}
+	}
+	return ""
+}
+
+func (r *Runner) resolveGradleExecutable(ctx context.Context, buildDir string) (string, error) {
+	gradlewCandidates := []string{
+		filepath.Join(buildDir, "gradlew"),
+		filepath.Join(buildDir, "gradlew.bat"),
+	}
+	for _, cand := range gradlewCandidates {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			if runtime.GOOS != "windows" {
+				_ = os.Chmod(cand, 0755)
+			}
+			return cand, nil
+		}
+	}
+
+	parentGradlew := filepath.Join(filepath.Dir(buildDir), "gradlew")
+	if fi, err := os.Stat(parentGradlew); err == nil && !fi.IsDir() {
+		if runtime.GOOS != "windows" {
+			_ = os.Chmod(parentGradlew, 0755)
+		}
+		return parentGradlew, nil
+	}
+
+	r.logger.Append("[Pipeline] gradlew script not found in repository.")
+
+	// Check for system Gradle
+	gradlePath := r.findSystemGradle()
+	if gradlePath != "" {
+		r.logger.Append(fmt.Sprintf("[Pipeline] Found Gradle at %s. Attempting to generate wrapper...", gradlePath))
+		wrapperCmd := exec.CommandContext(ctx, gradlePath, "wrapper")
+		wrapperCmd.Dir = buildDir
+		wrapperEnv := os.Environ()
+		if jh := r.resolveJavaHome(); jh != "" {
+			wrapperEnv = append(wrapperEnv, "JAVA_HOME="+jh)
+		}
+		if r.androidHome != "" {
+			wrapperEnv = append(wrapperEnv, "ANDROID_HOME="+r.androidHome, "ANDROID_SDK_ROOT="+r.androidHome)
+		}
+		wrapperCmd.Env = wrapperEnv
+		_ = r.runStreamingCommand(ctx, wrapperCmd, "[wrapper]")
+
+		for _, cand := range gradlewCandidates {
+			if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+				if runtime.GOOS != "windows" {
+					_ = os.Chmod(cand, 0755)
+				}
+				r.logger.Append("[Pipeline] Successfully generated Gradle wrapper.")
+				return cand, nil
+			}
+		}
+
+		r.logger.Append(fmt.Sprintf("[Pipeline] Building directly using Gradle: %s", gradlePath))
+		return gradlePath, nil
+	}
+
+	// Auto-install standalone Gradle
+	r.logger.Append("[Pipeline] Neither gradlew nor system Gradle was found. Auto-installing standalone Gradle 8.12...")
+	installedGradle, err := r.autoInstallGradle(ctx)
+	if err != nil {
+		return "", fmt.Errorf("could not find or auto-download Gradle: %w", err)
+	}
+
+	r.logger.Append(fmt.Sprintf("[Pipeline] Standalone Gradle ready at %s. Generating wrapper...", installedGradle))
+	wrapperCmd := exec.CommandContext(ctx, installedGradle, "wrapper")
+	wrapperCmd.Dir = buildDir
+	wrapperEnv := os.Environ()
+	if jh := r.resolveJavaHome(); jh != "" {
+		wrapperEnv = append(wrapperEnv, "JAVA_HOME="+jh)
+	}
+	if r.androidHome != "" {
+		wrapperEnv = append(wrapperEnv, "ANDROID_HOME="+r.androidHome, "ANDROID_SDK_ROOT="+r.androidHome)
+	}
+	wrapperCmd.Env = wrapperEnv
+	_ = r.runStreamingCommand(ctx, wrapperCmd, "[wrapper]")
+
+	for _, cand := range gradlewCandidates {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			if runtime.GOOS != "windows" {
+				_ = os.Chmod(cand, 0755)
+			}
+			return cand, nil
+		}
+	}
+
+	return installedGradle, nil
+}
+
+func (r *Runner) autoInstallGradle(ctx context.Context) (string, error) {
+	destDir := filepath.Join(r.dataDir, "tools", "gradle-8.12")
+	gradleBin := filepath.Join(destDir, "bin", "gradle")
+	if runtime.GOOS == "windows" {
+		gradleBin += ".bat"
+	}
+	if fi, err := os.Stat(gradleBin); err == nil && !fi.IsDir() {
+		return gradleBin, nil
+	}
+
+	_ = os.MkdirAll(filepath.Join(r.dataDir, "tools"), 0755)
+	zipPath := filepath.Join(r.dataDir, "tools", "gradle-8.12-bin.zip")
+
+	r.logger.Append("[Pipeline] Downloading https://services.gradle.org/distributions/gradle-8.12-bin.zip...")
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://services.gradle.org/distributions/gradle-8.12-bin.zip", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download Gradle: %w", err)
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(zipPath)
+
+	r.logger.Append("[Pipeline] Extracting Gradle 8.12 archive...")
+	if err := unzipArchive(zipPath, filepath.Join(r.dataDir, "tools")); err != nil {
+		return "", err
+	}
+
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(gradleBin, 0755)
+	}
+	return gradleBin, nil
+}
+
+func unzipArchive(src string, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(dest, f.Name)
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
+		}
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 

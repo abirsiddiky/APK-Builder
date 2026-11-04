@@ -162,9 +162,9 @@ fi
 # 5. Optional SDK and Dependency removal
 echo -e "${BLUE}[5/5] Processing optional removal flags...${NC}"
 if [[ "$REMOVE_SDK" == true ]]; then
-  echo "Removing Android SDK and Flutter..."
-  rm -rf /opt/android-sdk /opt/flutter
-  REMOVED_SUMMARY+=("Removed /opt/android-sdk and /opt/flutter")
+  echo "Removing Android SDK, Flutter, and Gradle..."
+  rm -rf /opt/android-sdk /opt/flutter /opt/gradle /usr/local/bin/gradle
+  REMOVED_SUMMARY+=("Removed /opt/android-sdk, /opt/flutter, and /opt/gradle")
 fi
 
 if [[ "$REMOVE_DEPS" == true ]]; then

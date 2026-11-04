@@ -162,6 +162,19 @@ echo "Installing Android platform-tools, build-tools;34.0.0, and platforms;andro
 chown -R builder:builder "$ANDROID_SDK_ROOT"
 chmod -R 755 "$ANDROID_SDK_ROOT"
 
+# Install Gradle
+echo -e "${BLUE}[4b/8] Installing Gradle 8.12 build tool to /opt/gradle...${NC}"
+if [[ ! -d "/opt/gradle" ]]; then
+  echo "Downloading Gradle 8.12..."
+  GRADLE_URL="https://services.gradle.org/distributions/gradle-8.12-bin.zip"
+  TMP_GRADLE="/tmp/gradle-8.12.zip"
+  curl -sSL -o "$TMP_GRADLE" "$GRADLE_URL"
+  unzip -q -o "$TMP_GRADLE" -d /opt
+  mv /opt/gradle-8.12 /opt/gradle
+  rm -f "$TMP_GRADLE"
+  ln -sf /opt/gradle/bin/gradle /usr/local/bin/gradle
+fi
+
 # Optional: Install Flutter
 if [[ "$INSTALL_FLUTTER" == true ]]; then
   echo -e "${BLUE}[5/8] Installing Flutter SDK to ${FLUTTER_ROOT}...${NC}"
