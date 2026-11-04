@@ -56,12 +56,17 @@ Create an Ubuntu 22.04 / Latest or Debian 12 / Latest VPS with at least **2 vCPU
 ### 2. Run the One-Command Installer
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/abirsiddiky/apk-builder/main/get.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash
+```
+
+Or with custom flags directly through the pipe:
+```bash
+curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash -s -- --flutter --domain apk.yourdomain.com
 ```
 
 #### Installer Flags:
 ```bash
-sudo ./install.sh [options]
+sudo ./install.sh [options]  # (or pass flags via: curl ... | sudo bash -s -- [options])
 
   --domain <domain>        Configure Caddy with free automated HTTPS (Let's Encrypt)
   --flutter                Download and configure Flutter SDK in /opt/flutter

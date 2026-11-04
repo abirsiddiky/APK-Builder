@@ -6,6 +6,11 @@
 
 set -euo pipefail
 
+# Ensure fully non-interactive apt and package manager execution
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -101,9 +106,8 @@ echo -e "${NC}"
 SERVER_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://icanhazip.com || hostname -I | awk '{print $1}')
 
 echo -e "${BLUE}[1/8] Updating package lists and installing core dependencies...${NC}"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq \
+apt-get update -qq </dev/null
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" \
   openjdk-17-jdk \
   git \
   unzip \
@@ -115,15 +119,17 @@ apt-get install -y -qq \
   xz-utils \
   debian-keyring \
   debian-archive-keyring \
-  apt-transport-https
+  apt-transport-https </dev/null
 
 # Install Caddy web server
 echo -e "${BLUE}[2/8] Installing Caddy reverse proxy...${NC}"
+mkdir -p /usr/share/keyrings /etc/apt/sources.list.d
+rm -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' </dev/null | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg </dev/null
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' </dev/null | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 if ! command -v caddy &>/dev/null; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  apt-get update -qq
-  apt-get install -y -qq caddy
+  apt-get update -qq </dev/null
+  apt-get install -y -qq -o Dpkg::Options::="--force-confold" caddy </dev/null
 fi
 
 # Create unprivileged system user 'builder'
@@ -204,10 +210,11 @@ TMP_CMDLINE="/tmp/cmdline-tools.zip"
 
 if [[ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]]; then
   echo "Downloading Android Command-line Tools..."
-  curl -sSL -o "$TMP_CMDLINE" "$CMDLINE_TOOLS_URL"
-  unzip -q -o "$TMP_CMDLINE" -d "/tmp/cmdline_extract"
+  curl -sSL -o "$TMP_CMDLINE" "$CMDLINE_TOOLS_URL" </dev/null
+  rm -rf /tmp/cmdline_extract
+  unzip -q -o "$TMP_CMDLINE" -d "/tmp/cmdline_extract" </dev/null
   mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-  cp -r /tmp/cmdline_extract/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+  cp -rf /tmp/cmdline_extract/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
   rm -rf /tmp/cmdline_extract "$TMP_CMDLINE"
 fi
 
@@ -223,7 +230,7 @@ echo "Installing Android platform-tools, build-tools;34.0.0, and platforms;andro
 "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
   "platform-tools" \
   "build-tools;34.0.0" \
-  "platforms;android-34" >/dev/null 2>&1
+  "platforms;android-34" >/dev/null 2>&1 </dev/null || true
 
 chown -R builder:builder "$ANDROID_SDK_ROOT"
 chmod -R 755 "$ANDROID_SDK_ROOT"
@@ -234,9 +241,10 @@ if [[ ! -d "/opt/gradle" ]]; then
   echo "Downloading Gradle 8.12..."
   GRADLE_URL="https://services.gradle.org/distributions/gradle-8.12-bin.zip"
   TMP_GRADLE="/tmp/gradle-8.12.zip"
-  curl -sSL -o "$TMP_GRADLE" "$GRADLE_URL"
-  unzip -q -o "$TMP_GRADLE" -d /opt
-  mv /opt/gradle-8.12 /opt/gradle
+  curl -sSL -o "$TMP_GRADLE" "$GRADLE_URL" </dev/null
+  unzip -q -o "$TMP_GRADLE" -d /opt </dev/null
+  rm -rf /opt/gradle
+  mv -f /opt/gradle-8.12 /opt/gradle
   rm -f "$TMP_GRADLE"
   ln -sf /opt/gradle/bin/gradle /usr/local/bin/gradle
 fi
@@ -246,10 +254,10 @@ if [[ "$INSTALL_FLUTTER" == true ]]; then
   echo -e "${BLUE}[5/8] Installing Flutter SDK to ${FLUTTER_ROOT}...${NC}"
   if [[ ! -d "$FLUTTER_ROOT" ]]; then
     FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.29.0-stable.tar.xz"
-    curl -sSL "$FLUTTER_URL" | tar -xJ -C /opt
+    curl -sSL "$FLUTTER_URL" </dev/null | tar -xJ -C /opt </dev/null
     chown -R builder:builder "$FLUTTER_ROOT"
-    git config --system --add safe.directory "$FLUTTER_ROOT"
-    su - builder -c "export ANDROID_HOME=$ANDROID_SDK_ROOT; export PATH=$FLUTTER_ROOT/bin:$PATH; flutter precache --android" >/dev/null 2>&1 || true
+    git config --system --add safe.directory "$FLUTTER_ROOT" </dev/null || true
+    su - builder -c "export ANDROID_HOME=$ANDROID_SDK_ROOT; export PATH=$FLUTTER_ROOT/bin:$PATH; flutter config --no-analytics; flutter precache --android" >/dev/null 2>&1 </dev/null || true
   fi
 else
   echo -e "${BLUE}[5/8] Skipping Flutter SDK (pass --flutter to install)...${NC}"
@@ -269,7 +277,7 @@ fi
 
 if [[ "$USE_EXISTING_BINARY" == true ]]; then
   echo "Using pre-compiled native Linux binary..."
-  cp "$SCRIPT_DIR/apkbuilder" "$INSTALL_DIR/apkbuilder"
+  cp -f "$SCRIPT_DIR/apkbuilder" "$INSTALL_DIR/apkbuilder"
 else
   echo "Pre-compiled Linux binary not detected. Building from source..."
   GO_BIN="go"
@@ -320,16 +328,16 @@ chown root:root "$INSTALL_DIR/apkbuilder"
 
 # Install Systemd Service
 echo -e "${BLUE}[7/8] Configuring and starting systemd service...${NC}"
-cp "$SCRIPT_DIR/apkbuilder.service" /etc/systemd/system/apkbuilder.service
+cp -f "$SCRIPT_DIR/apkbuilder.service" /etc/systemd/system/apkbuilder.service
 
 # If custom port passed, adjust in service unit
 if [[ "$PORT" != "8080" ]]; then
   sed -i "s/PORT=8080/PORT=$PORT/g" /etc/systemd/system/apkbuilder.service
 fi
 
-systemctl daemon-reload
-systemctl enable apkbuilder.service
-systemctl restart apkbuilder.service
+systemctl daemon-reload </dev/null
+systemctl enable apkbuilder.service </dev/null
+systemctl restart apkbuilder.service </dev/null
 
 # Optional: Warm Gradle Cache
 if [[ "$WARM_GRADLE" == true ]]; then
@@ -338,7 +346,7 @@ if [[ "$WARM_GRADLE" == true ]]; then
   rm -rf "$WARM_DIR"
   mkdir -p "$WARM_DIR"
   chown -R builder:builder "$WARM_DIR"
-  su - builder -c "mkdir -p $WARM_DIR && cd $WARM_DIR && gradle init --type basic --dsl kotlin </dev/null && ./gradlew --version" >/dev/null 2>&1 || true
+  su - builder -c "mkdir -p $WARM_DIR && cd $WARM_DIR && gradle init --type basic --dsl kotlin </dev/null && ./gradlew --version" >/dev/null 2>&1 </dev/null || true
   rm -rf "$WARM_DIR"
 fi
 
@@ -378,7 +386,7 @@ EOF
   ACCESS_URL="http://$SERVER_IP"
 fi
 
-systemctl restart caddy
+systemctl restart caddy </dev/null
 
 # Verify service is running
 sleep 1
