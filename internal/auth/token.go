@@ -28,29 +28,30 @@ func NewTokenManager(dataDir string, tokenOverride string) (*TokenManager, error
 		hashFile: hashPath,
 	}
 
-	// Case 1: Manual override via environment variable
+	// Case 1: Read existing hash from disk (preserves token across restarts & re-installs)
+	if data, err := os.ReadFile(hashPath); err == nil && len(data) > 0 {
+		tm.tokenHash = strings.TrimSpace(string(data))
+		fmt.Printf("[Auth] Loaded existing admin token hash from %s\n", hashPath)
+		return tm, nil
+	}
+
+	// Case 2: First run - environment token provided (APKBUILDER_ADMIN_TOKEN / ADMIN_TOKEN)
 	if strings.TrimSpace(tokenOverride) != "" {
 		token := strings.TrimSpace(tokenOverride)
 		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
 		if err != nil {
-			return nil, fmt.Errorf("failed to hash token override: %w", err)
+			return nil, fmt.Errorf("failed to hash admin token: %w", err)
 		}
 		if err := os.WriteFile(hashPath, hash, 0600); err != nil {
 			return nil, fmt.Errorf("failed to save token hash: %w", err)
 		}
 		tm.tokenHash = string(hash)
-		printTokenBanner(token, true)
+		fmt.Println("[Auth] Admin token hash initialized from environment (APKBUILDER_ADMIN_TOKEN).")
+		// Do not print secret token to logs; installer displays it securely to user
 		return tm, nil
 	}
 
-	// Case 2: Read existing hash from disk
-	if data, err := os.ReadFile(hashPath); err == nil && len(data) > 0 {
-		tm.tokenHash = strings.TrimSpace(string(data))
-		fmt.Printf("[Auth] Loaded admin token hash from %s\n", hashPath)
-		return tm, nil
-	}
-
-	// Case 3: First run - generate new random token
+	// Case 3: First run fallback - generate new random token (for standalone dev CLI runs)
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate random token: %w", err)

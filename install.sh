@@ -19,6 +19,7 @@ NC='\033[0m' # No Color
 DOMAIN=""
 INSTALL_FLUTTER=false
 WARM_GRADLE=false
+RESET_TOKEN=false
 PORT="8080"
 ADMIN_TOKEN=""
 INSTALL_DIR="/opt/apkbuilder"
@@ -41,6 +42,10 @@ while [[ $# -gt 0 ]]; do
       WARM_GRADLE=true
       shift
       ;;
+    --reset-token)
+      RESET_TOKEN=true
+      shift
+      ;;
     --port)
       PORT="$2"
       shift 2
@@ -56,6 +61,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --domain <domain>        Configure Caddy with automatic HTTPS for this domain"
       echo "  --flutter                Install Flutter SDK in addition to Android SDK"
       echo "  --warm-cache             Pre-warm Gradle caches to speed up initial builds"
+      echo "  --reset-token            Force generate a new admin token even if one already exists"
       echo "  --port <port>            Internal backend service port (default: 8080)"
       echo "  --admin-token <token>    Specify an admin token instead of generating a random one"
       echo "  -h, --help               Show this help message"
@@ -128,6 +134,65 @@ fi
 mkdir -p "$DATA_DIR" "$DATA_DIR/keystores" "$DATA_DIR/builds" "$INSTALL_DIR"
 chown -R builder:builder "$DATA_DIR"
 chmod 700 "$DATA_DIR"
+
+# Configure /etc/apkbuilder and Admin Access Token
+mkdir -p /etc/apkbuilder
+chmod 755 /etc/apkbuilder
+
+ENV_FILE="/etc/apkbuilder/env"
+HASH_FILE="$DATA_DIR/admin.token.hash"
+TOKEN=""
+IS_NEW_TOKEN=false
+
+if [[ -f "$HASH_FILE" || -f "$ENV_FILE" ]]; then
+  if [[ "$RESET_TOKEN" == true ]]; then
+    echo -e "${YELLOW}[Auth] --reset-token passed: Generating new admin token...${NC}"
+    if [[ -n "$ADMIN_TOKEN" ]]; then
+      TOKEN="$ADMIN_TOKEN"
+    else
+      TOKEN=$(openssl rand -hex 32)
+    fi
+    IS_NEW_TOKEN=true
+    rm -f "$HASH_FILE"
+  elif [[ -n "$ADMIN_TOKEN" ]]; then
+    echo -e "${YELLOW}[Auth] Custom --admin-token provided: Overwriting admin token...${NC}"
+    TOKEN="$ADMIN_TOKEN"
+    IS_NEW_TOKEN=true
+    rm -f "$HASH_FILE"
+  else
+    # Re-install: keep existing token
+    if [[ -f "$ENV_FILE" ]]; then
+      EXISTING_TOKEN=$(grep -E '^APKBUILDER_ADMIN_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    fi
+
+    if [[ -n "${EXISTING_TOKEN:-}" ]]; then
+      TOKEN="$EXISTING_TOKEN"
+      echo -e "${GREEN}[Auth] Existing token found in /etc/apkbuilder/env. Existing token kept.${NC}"
+      echo -e "${BLUE}       (Pass --reset-token to generate a new one)${NC}"
+    else
+      echo -e "${YELLOW}[Auth] Existing token hash found at $HASH_FILE. Existing token kept.${NC}"
+      echo -e "${BLUE}       (Pass --reset-token to generate a new one)${NC}"
+    fi
+  fi
+else
+  # First-time installation
+  echo -e "${BLUE}[Auth] Generating new admin access token...${NC}"
+  if [[ -n "$ADMIN_TOKEN" ]]; then
+    TOKEN="$ADMIN_TOKEN"
+  else
+    TOKEN=$(openssl rand -hex 32)
+  fi
+  IS_NEW_TOKEN=true
+fi
+
+# Write /etc/apkbuilder/env (chmod 600, owner root) if new token or file missing
+if [[ "$IS_NEW_TOKEN" == true || ! -f "$ENV_FILE" ]]; then
+  cat <<EOF > "$ENV_FILE"
+APKBUILDER_ADMIN_TOKEN=$TOKEN
+EOF
+  chmod 600 "$ENV_FILE"
+  chown root:root "$ENV_FILE"
+fi
 
 # Install Android SDK Command-Line Tools
 echo -e "${BLUE}[4/8] Installing Android SDK to ${ANDROID_SDK_ROOT}...${NC}"
@@ -256,13 +321,9 @@ chown root:root "$INSTALL_DIR/apkbuilder"
 echo -e "${BLUE}[7/8] Configuring and starting systemd service...${NC}"
 cp "$SCRIPT_DIR/apkbuilder.service" /etc/systemd/system/apkbuilder.service
 
-# If custom port or admin token passed, adjust in service or environment
+# If custom port passed, adjust in service unit
 if [[ "$PORT" != "8080" ]]; then
   sed -i "s/PORT=8080/PORT=$PORT/g" /etc/systemd/system/apkbuilder.service
-fi
-
-if [[ -n "$ADMIN_TOKEN" ]]; then
-  sed -i "/\[Service\]/a Environment=\"ADMIN_TOKEN=$ADMIN_TOKEN\"" /etc/systemd/system/apkbuilder.service
 fi
 
 systemctl daemon-reload
@@ -318,17 +379,11 @@ fi
 
 systemctl restart caddy
 
-# Wait briefly for service startup and retrieve admin token
-sleep 2
-GENERATED_TOKEN=""
-if [[ -n "$ADMIN_TOKEN" ]]; then
-  GENERATED_TOKEN="$ADMIN_TOKEN"
-else
-  # Extract token from journalctl
-  GENERATED_TOKEN=$(journalctl -u apkbuilder.service -n 50 --no-pager | grep -A 2 "Your admin access token is:" | tail -n 1 | xargs || true)
-  if [[ -z "$GENERATED_TOKEN" ]]; then
-    GENERATED_TOKEN=$(journalctl -u apkbuilder.service -n 50 --no-pager | grep -E "^\s*[a-f0-9]{64}\s*$" | head -n 1 | xargs || true)
-  fi
+# Verify service is running
+sleep 1
+if ! systemctl is-active --quiet apkbuilder.service; then
+  echo -e "${YELLOW}[Warning] apkbuilder service did not enter active state immediately. Check logs:${NC}"
+  echo -e "  sudo journalctl -u apkbuilder.service -n 20 --no-pager"
 fi
 
 echo -e "\n${GREEN}${BOLD}================================================================================${NC}"
@@ -336,10 +391,21 @@ echo -e "${GREEN}${BOLD}                     APK BUILDER INSTALLED SUCCESSFULLY!
 echo -e "${GREEN}${BOLD}================================================================================${NC}"
 echo ""
 echo -e "  ${BOLD}Web Dashboard URL:${NC}    ${CYAN}${ACCESS_URL}${NC}"
-if [[ -n "$GENERATED_TOKEN" ]]; then
-echo -e "  ${BOLD}Admin Access Token:${NC}   ${YELLOW}${GENERATED_TOKEN}${NC}"
+echo ""
+if [[ -n "$TOKEN" ]]; then
+echo -e "  ${YELLOW}${BOLD}+----------------------------------------------------------------------------+${NC}"
+echo -e "  ${YELLOW}${BOLD}| ADMIN ACCESS TOKEN                                                         |${NC}"
+echo -e "  ${YELLOW}${BOLD}+----------------------------------------------------------------------------+${NC}"
+echo -e "  ${CYAN}${BOLD}  ${TOKEN}${NC}"
+echo -e "  ${YELLOW}${BOLD}+----------------------------------------------------------------------------+${NC}"
+echo -e "  ${RED}${BOLD}  [IMPORTANT] Save it now! You need this token to log in and build APKs.      ${NC}"
+echo -e "  ${BLUE}  (Stored securely in /etc/apkbuilder/env - chmod 600, owner root)             ${NC}"
+if [[ "$IS_NEW_TOKEN" == false ]]; then
+echo -e "  ${GREEN}  Note: Existing token kept. Rerun with --reset-token to rotate.             ${NC}"
+fi
+echo -e "  ${YELLOW}${BOLD}+----------------------------------------------------------------------------+${NC}"
 else
-echo -e "  ${BOLD}Admin Access Token:${NC}   (Check: journalctl -u apkbuilder.service -n 20)"
+echo -e "  ${YELLOW}${BOLD}[NOTICE]${NC} Existing token kept. (Check /etc/apkbuilder/env)"
 fi
 echo ""
 if [[ -z "$DOMAIN" ]]; then

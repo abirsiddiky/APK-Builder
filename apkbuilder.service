@@ -11,6 +11,7 @@ WorkingDirectory=/var/lib/apkbuilder
 ExecStart=/opt/apkbuilder/apkbuilder
 
 # Environment Configuration
+EnvironmentFile=/etc/apkbuilder/env
 Environment="PORT=8080"
 Environment="DATA_DIR=/var/lib/apkbuilder"
 Environment="GRADLE_USER_HOME=/var/lib/apkbuilder/.gradle"

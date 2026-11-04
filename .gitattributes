@@ -10,3 +10,4 @@ internal/builder/wrapper_assets/gradle-wrapper.jar binary
 web/dist/*.js text eol=lf
 web/dist/*.css text eol=lf
 web/dist/*.html text eol=lf
+

@@ -122,6 +122,12 @@ if [[ -d "/var/lib/apkbuilder" ]]; then
   REMOVED_SUMMARY+=("Securely shredded sensitive keystores and token hashes")
 fi
 
+# Shred environment credentials if present
+if [[ -f "/etc/apkbuilder/env" ]]; then
+  wipe_file "/etc/apkbuilder/env"
+  REMOVED_SUMMARY+=("Securely wiped /etc/apkbuilder/env")
+fi
+
 # 3. Remove application and data directories
 echo -e "${BLUE}[3/5] Removing application files and directories...${NC}"
 if [[ -d "/opt/apkbuilder" ]]; then
@@ -132,6 +138,11 @@ fi
 if [[ -d "/var/lib/apkbuilder" ]]; then
   rm -rf /var/lib/apkbuilder
   REMOVED_SUMMARY+=("Removed /var/lib/apkbuilder")
+fi
+
+if [[ -d "/etc/apkbuilder" ]]; then
+  rm -rf /etc/apkbuilder
+  REMOVED_SUMMARY+=("Removed /etc/apkbuilder")
 fi
 
 # Clean up temp build caches

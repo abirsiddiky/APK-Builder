@@ -69,6 +69,7 @@ sudo ./install.sh [options]
   --domain <domain>        Configure Caddy with free automated HTTPS (Let's Encrypt)
   --flutter                Download and configure Flutter SDK in /opt/flutter
   --warm-cache             Pre-warm Gradle caches to speed up initial project builds
+  --reset-token            Force generate a new admin token even if one already exists
   --port <port>            Internal backend service port (default: 8080)
   --admin-token <token>    Set a predefined admin token instead of a generated one
 ```
@@ -78,14 +79,22 @@ sudo ./install.sh [options]
 sudo ./install.sh --domain apk.yourdomain.com --flutter --warm-cache
 ```
 
-Once installation finishes, the script prints your web dashboard URL and admin token:
+Once installation finishes, the script prints your web dashboard URL and a clearly highlighted admin access token box:
 ```
 ================================================================================
                      APK BUILDER INSTALLED SUCCESSFULLY!                        
 ================================================================================
 
   Web Dashboard URL:    https://apk.yourdomain.com
-  Admin Access Token:   3f12a884c90e8a71b...
+
+  +----------------------------------------------------------------------------+
+  | ADMIN ACCESS TOKEN                                                         |
+  +----------------------------------------------------------------------------+
+    3f12a884c90e8a71b83d1c99831a3b1a207ecda03f4e240217983633ef1ab452
+  +----------------------------------------------------------------------------+
+    [IMPORTANT] Save it now! You need this token to log in and build APKs.
+    (Stored securely in /etc/apkbuilder/env - chmod 600, owner root)
+  +----------------------------------------------------------------------------+
 
   Service Status:       sudo systemctl status apkbuilder
   Live Server Logs:     sudo journalctl -u apkbuilder -f

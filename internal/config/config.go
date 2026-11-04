@@ -67,13 +67,18 @@ func Load() *Config {
 		}
 	}
 
+	adminToken := os.Getenv("APKBUILDER_ADMIN_TOKEN")
+	if adminToken == "" {
+		adminToken = os.Getenv("ADMIN_TOKEN")
+	}
+
 	return &Config{
 		Port:                port,
 		DataDir:             dataDir,
 		AndroidHome:         androidHome,
 		FlutterHome:         flutterHome,
 		KeytoolBin:          keytoolBin,
-		AdminTokenOverride:  os.Getenv("ADMIN_TOKEN"),
+		AdminTokenOverride:  adminToken,
 		BuildTimeoutMinutes: timeoutMin,
 		IdleWarningMinutes:  idleWarningMin,
 	}
