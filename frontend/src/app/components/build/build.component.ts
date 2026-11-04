@@ -123,7 +123,8 @@ import { TerminalComponent } from '../terminal/terminal.component';
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
-            <span>Wipe Temp Artifacts</span>
+            <span class="btn-label-desktop">Wipe Temp Artifacts</span>
+            <span class="btn-label-mobile">Wipe Artifacts</span>
           </button>
         </div>
 
@@ -354,8 +355,32 @@ import { TerminalComponent } from '../terminal/terminal.component';
       gap: 10px;
     }
 
+    .btn-label-desktop {
+      display: inline;
+    }
+
+    .btn-label-mobile {
+      display: none;
+    }
+
+    .btn-cancel,
+    .btn-cleanup,
+    .btn-download-apk,
+    .btn-new-build {
+      box-sizing: border-box;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
     .btn-cancel {
-      padding: 10px 16px;
+      padding: 0 16px;
       background: var(--status-rose-bg);
       border: 1px solid var(--status-rose-border);
       color: #f87171;
@@ -367,7 +392,7 @@ import { TerminalComponent } from '../terminal/terminal.component';
     }
 
     .btn-cleanup {
-      padding: 10px 14px;
+      padding: 0 16px;
       background: var(--bg-surface-elevated);
       border: 1px solid var(--border-subtle);
       color: var(--text-dim);
@@ -379,18 +404,18 @@ import { TerminalComponent } from '../terminal/terminal.component';
       border-color: var(--border-muted);
     }
 
+    .btn-cleanup:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
     .btn-download-apk {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 20px;
+      padding: 0 20px;
       background: #10b981;
       color: #022c22;
-      font-weight: 700;
       border-radius: var(--radius-sm);
       text-decoration: none;
       box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
-      transition: background 0.15s ease;
     }
 
     .btn-download-apk:hover {
@@ -398,10 +423,9 @@ import { TerminalComponent } from '../terminal/terminal.component';
     }
 
     .btn-new-build {
-      padding: 10px 16px;
+      padding: 0 18px;
       background: var(--accent-primary);
       color: #031422;
-      font-weight: 600;
       border-radius: var(--radius-sm);
     }
 
@@ -410,17 +434,53 @@ import { TerminalComponent } from '../terminal/terminal.component';
     }
 
     @media (max-width: 600px) {
+      .build-page-container {
+        padding: 16px 14px 40px;
+      }
+
+      .btn-label-desktop {
+        display: none;
+      }
+
+      .btn-label-mobile {
+        display: inline;
+      }
+
       .actions-panel {
         flex-direction: column;
         align-items: stretch;
+        gap: 10px;
+        margin-top: 10px;
       }
-      .actions-left, .actions-right {
+
+      .actions-left {
         width: 100%;
-        justify-content: stretch;
+        display: flex;
+        align-items: stretch;
+        gap: 10px;
       }
-      .actions-left button, .actions-right a, .actions-right button {
-        flex: 1;
-        justify-content: center;
+
+      .actions-left button {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 44px;
+        padding: 0 8px;
+        font-size: 0.82rem;
+      }
+
+      .actions-right {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+
+      .actions-right a,
+      .actions-right button {
+        width: 100%;
+        height: 44px;
+        font-size: 0.85rem;
       }
     }
   `]

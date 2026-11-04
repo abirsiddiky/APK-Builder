@@ -29,7 +29,8 @@ import { ApiService } from '../../services/api.service';
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg>
-              <span>Uptime: {{ displayUptime() }}</span>
+              <span class="uptime-label-desktop">Uptime:&nbsp;</span>
+              <span class="uptime-val">{{ displayUptime() }}</span>
             </div>
           }
 
@@ -100,13 +101,16 @@ import { ApiService } from '../../services/api.service';
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       cursor: pointer;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .logo-box {
@@ -119,12 +123,14 @@ import { ApiService } from '../../services/api.service';
       align-items: center;
       justify-content: center;
       border: 1px solid rgba(56, 189, 248, 0.25);
+      flex-shrink: 0;
     }
 
     .brand-text {
       display: flex;
       align-items: center;
       gap: 8px;
+      white-space: nowrap;
     }
 
     .title {
@@ -132,6 +138,7 @@ import { ApiService } from '../../services/api.service';
       font-weight: 700;
       color: var(--text-main);
       letter-spacing: -0.01em;
+      white-space: nowrap;
     }
 
     .tag {
@@ -143,16 +150,18 @@ import { ApiService } from '../../services/api.service';
       background: var(--bg-surface-elevated);
       color: var(--text-muted);
       border: 1px solid var(--border-subtle);
+      white-space: nowrap;
     }
 
     .nav-actions {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      flex-shrink: 0;
     }
 
     .uptime-badge {
-      display: flex;
+      display: inline-flex;
       align-items: center;
       gap: 6px;
       padding: 6px 12px;
@@ -162,14 +171,26 @@ import { ApiService } from '../../services/api.service';
       font-size: 0.8rem;
       color: var(--accent-primary);
       font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .uptime-label-desktop {
+      display: inline;
     }
 
     .btn-logout {
-      padding: 6px 12px;
+      height: 34px;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       border-radius: var(--radius-sm);
       color: var(--text-muted);
       border: 1px solid var(--border-subtle);
       font-size: 0.85rem;
+      flex-shrink: 0;
     }
 
     .btn-logout:hover {
@@ -221,12 +242,49 @@ import { ApiService } from '../../services/api.service';
     }
 
     @media (max-width: 600px) {
+      .navbar-container {
+        padding: 10px 14px;
+        gap: 8px;
+      }
+      .brand {
+        gap: 8px;
+      }
+      .logo-box {
+        width: 32px;
+        height: 32px;
+      }
+      .logo-box svg {
+        width: 17px;
+        height: 17px;
+      }
+      .title {
+        font-size: 0.95rem;
+      }
+      .tag {
+        display: none;
+      }
+      .nav-actions {
+        gap: 6px;
+      }
+      .uptime-badge {
+        font-size: 0.76rem;
+        padding: 5px 9px;
+        gap: 5px;
+      }
+      .uptime-badge svg {
+        width: 13px;
+        height: 13px;
+      }
+      .uptime-label-desktop {
+        display: none;
+      }
       .logout-text {
         display: none;
       }
-      .uptime-badge {
-        font-size: 0.75rem;
-        padding: 5px 8px;
+      .btn-logout {
+        width: 32px;
+        height: 32px;
+        padding: 0;
       }
     }
   `]
