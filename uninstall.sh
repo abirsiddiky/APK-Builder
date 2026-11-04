@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # APK BUILDER - Uninstallation & VPS Cleanup Script
 # Run as root (sudo) to completely remove APK Builder and securely wipe data

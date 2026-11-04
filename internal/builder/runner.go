@@ -1,4 +1,4 @@
-﻿package builder
+package builder
 
 import (
 	"archive/zip"
@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1015,6 +1016,92 @@ func unzipArchive(src string, dest string) error {
 	return nil
 }
 
+const TargetFlutterVersion = "3.47.9"
+const MinimumDartVersion = "3.13.5"
+
+func compareVersions(v1, v2 string) int {
+	clean := func(v string) []int {
+		v = strings.TrimSpace(v)
+		v = strings.TrimPrefix(v, "v")
+		v = strings.TrimPrefix(v, "flutter-")
+		for _, sep := range []string{"-", "+", " "} {
+			if idx := strings.Index(v, sep); idx != -1 {
+				v = v[:idx]
+			}
+		}
+		parts := strings.Split(v, ".")
+		var nums []int
+		for _, p := range parts {
+			n, err := strconv.Atoi(strings.TrimSpace(p))
+			if err != nil {
+				break
+			}
+			nums = append(nums, n)
+		}
+		return nums
+	}
+
+	p1 := clean(v1)
+	p2 := clean(v2)
+	maxLen := len(p1)
+	if len(p2) > maxLen {
+		maxLen = len(p2)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		n1, n2 := 0, 0
+		if i < len(p1) {
+			n1 = p1[i]
+		}
+		if i < len(p2) {
+			n2 = p2[i]
+		}
+		if n1 < n2 {
+			return -1
+		}
+		if n1 > n2 {
+			return 1
+		}
+	}
+	return 0
+}
+
+func isFlutterOutdated(flutterDir string) bool {
+	// 1. Check .installed_version stamped by APK Builder
+	if data, err := os.ReadFile(filepath.Join(flutterDir, ".installed_version")); err == nil {
+		v := strings.TrimSpace(string(data))
+		if v != "" {
+			return compareVersions(v, TargetFlutterVersion) < 0
+		}
+	}
+
+	// 2. Check root version file
+	if data, err := os.ReadFile(filepath.Join(flutterDir, "version")); err == nil {
+		v := strings.TrimSpace(string(data))
+		if v != "" {
+			return compareVersions(v, TargetFlutterVersion) < 0
+		}
+	}
+
+	// 3. Check Dart SDK version in bin/cache/dart-sdk/version
+	if data, err := os.ReadFile(filepath.Join(flutterDir, "bin", "cache", "dart-sdk", "version")); err == nil {
+		v := strings.TrimSpace(string(data))
+		if v != "" {
+			return compareVersions(v, MinimumDartVersion) < 0
+		}
+	}
+
+	// 4. Check bin/internal/release-candidate-branch.version
+	if data, err := os.ReadFile(filepath.Join(flutterDir, "bin", "internal", "release-candidate-branch.version")); err == nil {
+		v := strings.TrimSpace(string(data))
+		if v != "" {
+			return compareVersions(v, "3.47") < 0
+		}
+	}
+
+	return true
+}
+
 func (r *Runner) resolveFlutterBin(ctx context.Context) (string, error) {
 	// 1. Check FLUTTER_ROOT / r.flutterHome if it actually exists on disk
 	if r.flutterHome != "" {
@@ -1023,7 +1110,10 @@ func (r *Runner) resolveFlutterBin(ctx context.Context) (string, error) {
 			cand += ".bat"
 		}
 		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-			return cand, nil
+			if !isFlutterOutdated(r.flutterHome) {
+				return cand, nil
+			}
+			r.logger.Append(fmt.Sprintf("[Pipeline] Notice: Flutter in %s is outdated (< %s). Checking fallback...", r.flutterHome, TargetFlutterVersion))
 		}
 	}
 
@@ -1031,21 +1121,36 @@ func (r *Runner) resolveFlutterBin(ctx context.Context) (string, error) {
 	if runtime.GOOS == "linux" {
 		cand := "/opt/flutter/bin/flutter"
 		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-			return cand, nil
+			if !isFlutterOutdated("/opt/flutter") {
+				return cand, nil
+			}
+			r.logger.Append(fmt.Sprintf("[Pipeline] Notice: Flutter in /opt/flutter is outdated (< %s). Checking fallback...", TargetFlutterVersion))
 		}
 	}
 
 	// 3. Check system PATH
 	if p, err := exec.LookPath("flutter"); err == nil {
-		return p, nil
+		flutterDir := filepath.Dir(filepath.Dir(p))
+		if !isFlutterOutdated(flutterDir) {
+			return p, nil
+		}
 	}
 
 	// 4. Check dataDir tools/flutter
-	toolsFlutter := filepath.Join(r.dataDir, "tools", "flutter", "bin", "flutter")
+	toolsFlutterDir := filepath.Join(r.dataDir, "tools", "flutter")
+	toolsFlutter := filepath.Join(toolsFlutterDir, "bin", "flutter")
 	if runtime.GOOS == "windows" {
 		toolsFlutter += ".bat"
 	}
 	if fi, err := os.Stat(toolsFlutter); err == nil && !fi.IsDir() {
+		if !isFlutterOutdated(toolsFlutterDir) {
+			return toolsFlutter, nil
+		}
+		if runtime.GOOS == "linux" {
+			r.logger.Append(fmt.Sprintf("[Pipeline] Cached Flutter SDK in %s is outdated (< %s). Upgrading to Flutter %s (Dart 3.13.7)...", toolsFlutterDir, TargetFlutterVersion, TargetFlutterVersion))
+			_ = os.RemoveAll(toolsFlutterDir)
+			return r.autoInstallFlutter(ctx)
+		}
 		return toolsFlutter, nil
 	}
 
@@ -1063,33 +1168,40 @@ func (r *Runner) autoInstallFlutter(ctx context.Context) (string, error) {
 	targetDir := filepath.Join(flutterToolsDir, "flutter")
 	flutterBin := filepath.Join(targetDir, "bin", "flutter")
 
-	if fi, err := os.Stat(flutterBin); err == nil && !fi.IsDir() {
+	if fi, err := os.Stat(flutterBin); err == nil && !fi.IsDir() && !isFlutterOutdated(targetDir) {
 		return flutterBin, nil
 	}
 
-	r.logger.Append("[Pipeline] Flutter SDK was not pre-installed on this VPS.")
-	r.logger.Append("[Pipeline] Automatically downloading and configuring Flutter SDK (stable channel, ~750MB)...")
-
-	flutterURL := "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.29.0-stable.tar.xz"
-	if runtime.GOARCH == "arm64" {
-		flutterURL = "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_arm64_3.29.0-stable.tar.xz"
-	}
+	r.logger.Append("[Pipeline] Flutter SDK was not pre-installed or is outdated on this VPS.")
+	r.logger.Append(fmt.Sprintf("[Pipeline] Automatically configuring Flutter SDK %s (stable channel with Dart 3.13.7)...", TargetFlutterVersion))
 
 	archivePath := filepath.Join(flutterToolsDir, "flutter.tar.xz")
 	defer os.Remove(archivePath)
 
-	r.logger.Append(fmt.Sprintf("[Pipeline] Downloading Flutter from %s (this may take 1-2 minutes)...", flutterURL))
-	downloadCmd := exec.CommandContext(ctx, "curl", "-sSL", "--fail", "-o", archivePath, flutterURL)
-	downloadCmd.Dir = flutterToolsDir
-	if err := r.runStreamingCommand(ctx, downloadCmd, "[download]"); err != nil {
-		return "", fmt.Errorf("failed to download Flutter SDK: %w (You can also install via: sudo ./install.sh --flutter)", err)
-	}
+	if runtime.GOARCH == "arm64" {
+		r.logger.Append("[Pipeline] Cloning Flutter SDK for arm64 from GitHub stable branch...")
+		_ = os.RemoveAll(targetDir)
+		cloneCmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "-b", "stable", "https://github.com/flutter/flutter.git", targetDir)
+		cloneCmd.Dir = flutterToolsDir
+		if err := r.runStreamingCommand(ctx, cloneCmd, "[git-clone]"); err != nil {
+			return "", fmt.Errorf("failed to clone Flutter SDK: %w", err)
+		}
+	} else {
+		flutterURL := fmt.Sprintf("https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_%s-stable.tar.xz", TargetFlutterVersion)
+		r.logger.Append(fmt.Sprintf("[Pipeline] Downloading Flutter from %s (approx 1.5GB, takes 15-45s on VPS network)...", flutterURL))
+		downloadCmd := exec.CommandContext(ctx, "curl", "-sSL", "--fail", "-o", archivePath, flutterURL)
+		downloadCmd.Dir = flutterToolsDir
+		if err := r.runStreamingCommand(ctx, downloadCmd, "[download]"); err != nil {
+			return "", fmt.Errorf("failed to download Flutter SDK: %w (You can also install via: sudo ./install.sh --flutter)", err)
+		}
 
-	r.logger.Append("[Pipeline] Extracting Flutter archive to " + targetDir + "...")
-	extractCmd := exec.CommandContext(ctx, "tar", "-xJf", archivePath, "-C", flutterToolsDir)
-	extractCmd.Dir = flutterToolsDir
-	if err := r.runStreamingCommand(ctx, extractCmd, "[extract]"); err != nil {
-		return "", fmt.Errorf("failed to extract Flutter SDK: %w (ensure xz-utils is installed)", err)
+		r.logger.Append("[Pipeline] Extracting Flutter archive to " + targetDir + "...")
+		_ = os.RemoveAll(targetDir)
+		extractCmd := exec.CommandContext(ctx, "tar", "-xJf", archivePath, "-C", flutterToolsDir)
+		extractCmd.Dir = flutterToolsDir
+		if err := r.runStreamingCommand(ctx, extractCmd, "[extract]"); err != nil {
+			return "", fmt.Errorf("failed to extract Flutter SDK: %w (ensure xz-utils is installed)", err)
+		}
 	}
 
 	if _, err := os.Stat(flutterBin); err != nil {
@@ -1097,9 +1209,13 @@ func (r *Runner) autoInstallFlutter(ctx context.Context) (string, error) {
 	}
 
 	_ = os.Chmod(flutterBin, 0755)
+	_ = os.WriteFile(filepath.Join(targetDir, ".installed_version"), []byte(TargetFlutterVersion), 0644)
 
 	// Add safe directory for git
 	_ = exec.Command("git", "config", "--global", "--add", "safe.directory", targetDir).Run()
+
+	// Disable analytics explicitly
+	_ = exec.Command(flutterBin, "config", "--no-analytics").Run()
 
 	// Precache Android artifacts
 	r.logger.Append("[Pipeline] Pre-caching Flutter Android artifacts...")

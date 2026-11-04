@@ -1,4 +1,4 @@
-﻿[Unit]
+[Unit]
 Description=APK Builder - Self-Hosted Android APK Build Service
 After=network.target network-online.target
 Wants=network-online.target

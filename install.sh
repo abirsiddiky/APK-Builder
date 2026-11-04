@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # APK BUILDER - Native One-Time Installer (Ubuntu / Debian)
 # Single binary, no Docker, systemd service running as user 'builder'
@@ -281,8 +281,9 @@ fi
 if [[ "$INSTALL_FLUTTER" == true ]]; then
   echo -e "${BLUE}[5/8] Installing Flutter SDK to ${FLUTTER_ROOT}...${NC}"
   if [[ ! -d "$FLUTTER_ROOT" ]]; then
-    FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.29.0-stable.tar.xz"
+    FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.9-stable.tar.xz"
     curl -sSL "$FLUTTER_URL" </dev/null | tar -xJ -C /opt </dev/null
+    echo "3.47.9" > "$FLUTTER_ROOT/.installed_version"
     chown -R builder:builder "$FLUTTER_ROOT"
     git config --system --add safe.directory "$FLUTTER_ROOT" </dev/null || true
     su - builder -c "export ANDROID_HOME=$ANDROID_SDK_ROOT; export PATH=$FLUTTER_ROOT/bin:$PATH; flutter config --no-analytics; flutter precache --android" >/dev/null 2>&1 </dev/null || true
