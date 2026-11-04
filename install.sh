@@ -1,8 +1,13 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ==============================================================================
 # APK BUILDER - Native One-Time Installer (Ubuntu / Debian)
 # Single binary, no Docker, systemd service running as user 'builder'
 # ==============================================================================
+
+# Ensure script is executed under bash even if invoked via `sh ./install.sh`
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /bin/bash "$0" "$@"
+fi
 
 set -euo pipefail
 

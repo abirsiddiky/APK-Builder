@@ -1,8 +1,13 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ==============================================================================
 # APK BUILDER - Uninstallation & VPS Cleanup Script
 # Run as root (sudo) to completely remove APK Builder and securely wipe data
 # ==============================================================================
+
+# Ensure script is executed under bash even if invoked via `sh ./uninstall.sh`
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /bin/bash "$0" "$@"
+fi
 
 set -euo pipefail
 
@@ -44,8 +49,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  -y, --yes          Non-interactive mode (skip confirmation prompt)"
-      echo "  --remove-sdk       Also delete Android SDK (/opt/android-sdk) and Flutter (/opt/flutter)"
-      echo "  --remove-deps      Also uninstall OpenJDK 17 and Caddy packages"
+      echo "  --remove-sdk       Also delete Android SDK (/opt/android-sdk), Flutter (/opt/flutter), and Gradle"
+      echo "  --remove-deps      Also uninstall OpenJDK and Caddy packages"
       echo "  --purge-all        Purge EVERYTHING: app, user, keystores, SDK, and dependencies"
       echo "  -h, --help         Show this help message"
       exit 0
@@ -73,7 +78,15 @@ if [[ "$AUTO_CONFIRM" != true ]]; then
   echo -e "${YELLOW}This will completely remove the APK Builder service, user accounts, and"
   echo -e "securely wipe all stored keystores, tokens, and build artifacts.${NC}"
   echo ""
-  read -r -p "Are you sure you want to proceed with uninstallation? [y/N]: " confirm
+  confirm=""
+  if [ -t 0 ]; then
+    read -r -p "Are you sure you want to proceed with uninstallation? [y/N]: " confirm
+  elif [ -c /dev/tty ]; then
+    read -r -p "Are you sure you want to proceed with uninstallation? [y/N]: " confirm </dev/tty
+  else
+    echo -e "${RED}[Error] Non-interactive environment detected. Pass -y or --yes to proceed.${NC}"
+    exit 1
+  fi
   if [[ "$confirm" != [yY] && "$confirm" != [yY][eE][sS] ]]; then
     echo -e "${BLUE}Uninstallation cancelled.${NC}"
     exit 0
@@ -116,7 +129,7 @@ wipe_file() {
 
 # Find and shred all sensitive files in /var/lib/apkbuilder
 if [[ -d "/var/lib/apkbuilder" ]]; then
-  find /var/lib/apkbuilder -type f \( -name "*.keystore" -o -name "*.jks" -o -name "*.hash" -o -name "info.txt" \) | while read -r f; do
+  find /var/lib/apkbuilder -type f \( -name "*.keystore" -o -name "*.jks" -o -name "*.hash" -o -name "info.txt" \) 2>/dev/null | while read -r f; do
     wipe_file "$f"
   done
   REMOVED_SUMMARY+=("Securely shredded sensitive keystores and token hashes")
@@ -146,7 +159,7 @@ if [[ -d "/etc/apkbuilder" ]]; then
 fi
 
 # Clean up temp build caches
-rm -rf /tmp/cmdline-tools* /tmp/gradle* /tmp/cmdline_extract 2>/dev/null || true
+rm -rf /tmp/cmdline-tools* /tmp/gradle* /tmp/cmdline_extract /tmp/go-bootstrap 2>/dev/null || true
 
 # 4. Remove 'builder' system user
 echo -e "${BLUE}[4/5] Removing service user 'builder'...${NC}"
@@ -186,6 +199,11 @@ if [[ "$REMOVE_DEPS" == true ]]; then
   REMOVED_SUMMARY+=("Uninstalled OpenJDK and caddy packages")
 fi
 
+# Clean up temporary installer clone if not currently running from it
+if [[ "$(pwd)" != "/tmp/apkbuilder-install" ]]; then
+  rm -rf /tmp/apkbuilder-install 2>/dev/null || true
+fi
+
 # Print final removal summary
 echo -e "\n${GREEN}${BOLD}================================================================================${NC}"
 echo -e "${GREEN}${BOLD}                   APK BUILDER UNINSTALLED SUCCESSFULLY                         ${NC}"
@@ -193,7 +211,7 @@ echo -e "${GREEN}${BOLD}========================================================
 echo ""
 echo -e "${BOLD}Removed components:${NC}"
 for item in "${REMOVED_SUMMARY[@]}"; do
-  echo -e "  ${GREEN}Ã¢Å“â€œ${NC} $item"
+  echo -e "  ${GREEN}[✓]${NC} $item"
 done
 echo ""
 if [[ "$REMOVE_SDK" == false ]]; then
@@ -206,4 +224,3 @@ echo -e "${RED}${BOLD}                               FINAL REMINDER             
 echo -e "${RED}${BOLD}  Delete this VPS from your cloud provider panel (DigitalOcean, Hetzner, AWS,   ${NC}"
 echo -e "${RED}${BOLD}  Vultr, Linode) now to stop hourly billing!                                    ${NC}"
 echo -e "${RED}${BOLD}================================================================================${NC}\n"
-

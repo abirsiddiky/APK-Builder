@@ -8,19 +8,22 @@
 ## Features
 
 - **No Docker Required:** Native one-time installation directly on bare-metal or disposable Linux cloud VPS (Hetzner, DigitalOcean, Vultr, Linode, AWS EC2, etc.).
+- **Wide OS Support:** Fully tested on Ubuntu (20.04, 22.04, 24.04, 26.04 LTS) and Debian (11 Bullseye, 12 Bookworm, 13 Trixie).
 - **Single Static Binary:** Go backend embedding the compiled Angular 22 SPA frontend with `go:embed`.
 - **Security by Design:**
-  - Runs as unprivileged system user `builder` (not `root`).
-  - Cryptographically secure admin token printed on first launch and hashed to disk.
+  - Runs as an unprivileged system user `builder` (not `root`) under systemd.
+  - Cryptographically secure 64-char admin token generated during install, stored in `/etc/apkbuilder/env` (`chmod 600`), and securely hashed.
   - In-memory rate limiting protecting against brute-force login attempts.
-  - Real-time secret and password masking across all logs and SSE streams.
+  - Real-time secret, token, and password masking across all logs and SSE streams.
   - Temporary files and keystores stored with `chmod 600` inside a `chmod 700` directory.
-- **Project Auto-Detection:** Supports standard Android Gradle projects (`./gradlew`) and Flutter applications (`pubspec.yaml`).
+- **Smart Project Auto-Detection:**
+  - **Android Gradle Projects:** Supports Groovy and Kotlin DSL (`build.gradle`, `build.gradle.kts`, `settings.gradle.kts`), AGP 8.x / 9.x, and Gradle 9.3+. If a repository lacks the Gradle wrapper executable or jar, APK Builder automatically injects an embedded wrapper while preserving your custom distribution configuration.
+  - **Flutter Projects:** Supports modern Flutter apps (`pubspec.yaml`). Ships with Flutter **3.47.9** stable and **Dart SDK 3.13.7** (satisfying modern dependencies such as `environment: sdk: ^3.13.5+`). Automatically detects outdated cached SDKs and auto-upgrades them on demand.
 - **Signed Release Pipeline:**
   - Built-in RSA 2048 keystore generator via `keytool -genkeypair`.
   - Supports uploading existing `.jks` or `.keystore` files.
   - Downloads `.keystore` + `info.txt` credentials file with prominent backup warning.
-  - Automated `zipalign` and `apksigner` signing pipeline.
+  - Automated `zipalign` and `apksigner` release signing pipeline.
 - **Terminal-Style Build Log:**
   - Embedded `@xterm/xterm` + `FitAddon` terminal with authentic dark theme.
   - Real-time Server-Sent Events (SSE) streaming with ANSI color rendering.
@@ -31,7 +34,7 @@
   - Live server uptime cost hint in the navigation bar.
   - 60-minute idle warning banner urging you to power off unused VPS instances.
   - Persistent post-build banner reminding you to delete your VPS once the APK is downloaded.
-  - Complete uninstaller (`uninstall.sh`) with data shredding.
+  - Complete uninstaller (`uninstall.sh`) with cryptographic data shredding.
 
 ---
 
@@ -43,7 +46,9 @@
 | **Frontend** | Angular 22 | Standalone components, reactive Signals, mobile-first CSS |
 | **Terminal** | `@xterm/xterm` + `@xterm/addon-fit` | Canvas-accelerated ANSI terminal emulator |
 | **Reverse Proxy** | Caddy 2 | Low-latency streaming proxy (`flush_interval -1`) with automatic HTTPS |
+| **JDK** | OpenJDK 17 / 21 / `default-jdk` | Dynamically detected with automated `JAVA_HOME` configuration |
 | **Android SDK** | `cmdline-tools` / `build-tools;34.0.0` | `platform-tools`, `platforms;android-34`, `zipalign`, `apksigner` |
+| **Flutter SDK** | Flutter 3.47.9 / Dart 3.13.7 | Modern stable channel with automatic migration & precache |
 | **Service** | systemd | Managed under unprivileged user `builder` |
 
 ---
@@ -51,7 +56,7 @@
 ## Quick Start (Ubuntu / Debian VPS)
 
 ### 1. Launch a Fresh Linux VPS
-Create an Ubuntu 22.04 / Latest or Debian 12 / Latest VPS with at least **2 vCPUs** and **4 GB RAM** (8 GB recommended for large Gradle/Flutter builds).
+Create an Ubuntu (22.04 / 24.04 / Latest) or Debian (12 / 13) VPS with at least **2 vCPUs** and **4 GB RAM** (8 GB recommended for large Gradle/Flutter builds).
 
 ### 2. Run the One-Command Installer
 
@@ -59,7 +64,7 @@ Create an Ubuntu 22.04 / Latest or Debian 12 / Latest VPS with at least **2 vCPU
 curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash
 ```
 
-Or with custom flags directly through the pipe:
+Or pass custom flags directly through the pipe:
 ```bash
 curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash -s -- --flutter --domain apk.yourdomain.com
 ```
@@ -69,14 +74,14 @@ curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh 
 sudo ./install.sh [options]  # (or pass flags via: curl ... | sudo bash -s -- [options])
 
   --domain <domain>        Configure Caddy with free automated HTTPS (Let's Encrypt)
-  --flutter                Download and configure Flutter SDK in /opt/flutter
+  --flutter                Pre-install Flutter SDK into /opt/flutter (otherwise downloaded on demand)
   --warm-cache             Pre-warm Gradle caches to speed up initial project builds
   --reset-token            Force generate a new admin token even if one already exists
   --port <port>            Internal backend service port (default: 8080)
   --admin-token <token>    Set a predefined admin token instead of a generated one
 ```
 
-**Example with Domain and Flutter:**
+**Example with Custom Domain and Pre-warmed Caches:**
 ```bash
 sudo ./install.sh --domain apk.yourdomain.com --flutter --warm-cache
 ```
@@ -109,28 +114,47 @@ Once installation finishes, the script prints your web dashboard URL and a clear
 
 ---
 
-## Uninstallation (`uninstall.sh`)
+## Updating an Existing Installation
 
-When you are done building your APKs, you can wipe the app or completely clean your VPS using `uninstall.sh`:
+To upgrade APK Builder to the latest version on an existing server while **preserving your admin token, keystores, and settings**:
 
 ```bash
-sudo ./uninstall.sh
+cd ~/apk-builder
+git pull
+sudo ./install.sh
+```
+
+---
+
+## Uninstallation (`uninstall.sh`)
+
+When you are done building your APKs, you can wipe the app or completely clean your VPS using `uninstall.sh`.
+
+### One-Command Pipe Uninstaller:
+```bash
+curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/uninstall.sh | sudo bash -s -- -y
+```
+
+### Or Run Locally:
+```bash
+sudo ./uninstall.sh [options]
 ```
 
 #### Uninstaller Options:
-```bash
-sudo ./uninstall.sh [options]
-
+```
   -y, --yes          Non-interactive mode (skips confirmation prompt)
-  --remove-sdk       Delete Android SDK (/opt/android-sdk) and Flutter (/opt/flutter)
-  --remove-deps      Uninstall OpenJDK 17 and Caddy packages
+  --remove-sdk       Also delete Android SDK (/opt/android-sdk), Flutter (/opt/flutter), and Gradle
+  --remove-deps      Also uninstall OpenJDK and Caddy packages
   --purge-all        Wipe EVERYTHING: app, user, keystores, SDK, and dependencies
+  -h, --help         Show help message
 ```
 
 **Complete Purge Example:**
 ```bash
-sudo ./uninstall.sh --yes --purge-all
+sudo ./uninstall.sh -y --purge-all
 ```
+
+> **Data Destruction Notice:** Sensitive credentials, stored keys, and admin tokens in `/etc/apkbuilder/env` and `/var/lib/apkbuilder` are cryptographically shredded (`shred -u -z`) before files are deleted.
 
 > **Cloud Cost Reminder:** To stop hourly billing completely, delete or destroy the VPS instance directly from your cloud provider's dashboard (Hetzner, DigitalOcean, Linode, AWS, etc.).
 
@@ -141,7 +165,7 @@ sudo ./uninstall.sh --yes --purge-all
 ### Prerequisites
 - Go 1.22+
 - Node.js 20+ & npm
-- JDK 17+
+- JDK 17+ or 21+
 
 ### 1. Build the Angular 22 Frontend
 ```bash
@@ -200,4 +224,3 @@ All endpoints except `POST /api/auth/login` require `Authorization: Bearer <toke
 ## License
 
 MIT License. Free to use on personal and commercial cloud instances.
-

@@ -6,6 +6,11 @@
 #   curl -sSL https://raw.githubusercontent.com/abirsiddiky/APK-Builder/main/get.sh | sudo bash -s -- --flutter --domain yourdomain.com
 # ==============================================================================
 
+# Ensure script is executed under bash even if invoked via `sh`
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /bin/bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
